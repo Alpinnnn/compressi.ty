@@ -7,7 +7,7 @@ use resvg::{
 };
 
 const APP_ICON_TEXTURE_NAME: &str = "compressity-app-icon";
-const APP_ICON_PATH: &str = "assets/fonts/icon/icon.svg";
+const APP_ICON_PATH: &str = "assets/icon/icon.svg";
 
 pub fn load_window_icon() -> Option<IconData> {
     let image = load_svg_image(256)?;

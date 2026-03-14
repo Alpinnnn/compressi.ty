@@ -11,7 +11,10 @@ pub const IMAGE: char = '\u{F147}';
 pub const IMAGES: char = '\u{F148}';
 pub const VIDEO: char = '\u{F256}';
 pub const ARCHIVE: char = '\u{F102}';
-pub const PLAY: char = '\u{F488}';
+pub const PLAY: char = '\u{F488}';       // ion-ios-play
+pub const TRASH: char = '\u{F252}';      // ion-trash-a
+pub const ZOOM_IN: char = '\u{F48B}';    // ion-ios-plus
+pub const ZOOM_OUT: char = '\u{F464}';   // ion-ios-minus
 
 pub fn font_family() -> FontFamily {
     FontFamily::Name("ionicons".into())

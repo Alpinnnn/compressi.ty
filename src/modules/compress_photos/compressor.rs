@@ -112,12 +112,16 @@ pub fn load_photo(path: PathBuf, id: u64) -> Result<LoadedPhoto, String> {
 pub fn start_batch(
     files: Vec<PhotoAsset>,
     settings: CompressionSettings,
+    custom_output_dir: Option<PathBuf>,
 ) -> Result<CompressionHandle, String> {
     if files.is_empty() {
         return Err("Add at least one supported image before compressing.".to_owned());
     }
 
-    let output_dir = create_output_dir()?;
+    let output_dir = match custom_output_dir {
+        Some(dir) => dir,
+        None => create_output_dir()?,
+    };
     fs::create_dir_all(&output_dir).map_err(|error| {
         format!(
             "Could not create output folder {}: {error}",
