@@ -1,0 +1,15 @@
+[package]
+name = "compressity"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eframe = "0.31"
+image = "0.25"
+img-parts = "0.4"
+mozjpeg = "0.10"
+open = "5.3"
+rayon = "1.10"
+resvg = "0.47"
+rfd = "0.15"
+webp = "0.3"
