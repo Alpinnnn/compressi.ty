@@ -1,0 +1,94 @@
+Compressity Personal Source-Share Attribution NonCommercial License 1.0
+
+Copyright (c) 2026 Euphyfve
+
+This license applies to the Compressity project and any portion of it made
+available by the Licensor.
+
+1. Definitions
+
+"Licensor" means the copyright holder licensing the Software.
+
+"Software" means this project, including its source code, assets,
+documentation, and any original material distributed with it.
+
+"Modified Version" means any version of the Software that you change, adapt,
+translate, extend, or build upon.
+
+"Source Code" means the preferred form of the Software for making modifications,
+including build files, scripts, configuration, and the source of any included
+assets that are necessary to modify and rebuild the distributed version.
+
+"NonCommercial" means not primarily intended for or directed toward commercial
+advantage or monetary compensation. NonCommercial use does not include selling,
+licensing for a fee, paid support, bundling with paid products or services,
+using the Software in a paid service, or internal use in support of a
+for-profit business activity.
+
+2. Personal Use Grant
+
+Subject to this License, you are granted a personal, non-exclusive,
+non-transferable, revocable right to use, copy, run, and modify the Software
+for your own private NonCommercial purposes.
+
+3. Distribution Conditions
+
+You may distribute the Software or any Modified Version only if all of the
+following conditions are met:
+
+a. the distribution is NonCommercial;
+b. the complete corresponding Source Code is provided with the distribution, or
+   is made publicly available at no charge in a clearly referenced location;
+c. the Software or Modified Version is licensed in its entirety under this same
+   License;
+d. all existing copyright notices, attribution notices, and this License text
+   are kept intact;
+e. you clearly state that changes were made, if you modified the Software; and
+f. you do not impose legal or technical restrictions that would prevent
+   recipients from exercising the rights granted by this License.
+
+For clarity, distributing only a closed-source binary, executable, or packaged
+form of the Software is not permitted.
+
+4. Attribution Requirement
+
+Any use or distribution of the Software or a Modified Version must give visible
+credit to the original project and Licensor. At minimum, you must include:
+
+"Based on Compressity by Euphyfve"
+
+This credit must appear in at least one reasonable place relevant to the form
+of distribution, such as:
+
+a. a README or documentation file;
+b. an about page, credits page, or equivalent in an application UI; or
+c. a repository description or release notes accompanying the distribution.
+
+5. Commercial Use Prohibited
+
+You may not use, distribute, sublicense, sell, lease, monetize, or otherwise
+exploit the Software or any Modified Version for Commercial purposes.
+
+6. No Trademark License
+
+This License does not grant any right to use the Licensor's names, logos, or
+trademarks except as required for accurate attribution under Section 4.
+
+7. Termination
+
+Any violation of this License automatically terminates your rights under it.
+If you stop the violation and the Licensor explicitly reinstates your rights,
+you may resume using the Software under this License.
+
+8. No Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT.
+
+9. Limitation of Liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE LICENSOR SHALL NOT BE LIABLE FOR
+ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT,
+OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
