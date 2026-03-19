@@ -123,6 +123,10 @@ impl AppTheme {
             FontId::new(11.5, FontFamily::Proportional),
         );
 
+        // Disable text selection globally so clicks on labels always
+        // propagate to their parent interactive widget (card, button, etc.)
+        style.interaction.selectable_labels = false;
+
         ctx.set_style(style);
     }
 

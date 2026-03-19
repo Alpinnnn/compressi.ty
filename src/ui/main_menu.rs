@@ -209,20 +209,8 @@ fn paint_logo(ui: &mut Ui, theme: &AppTheme, app_icon: Option<&TextureHandle>) {
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     let accent = theme.colors.accent;
 
-    ui.painter().rect_filled(
-        rect,
-        theme.rounded(10),
-        theme.mix(theme.colors.surface, accent, 0.08),
-    );
-    ui.painter().rect_stroke(
-        rect,
-        theme.rounded(10),
-        Stroke::new(1.0, theme.mix(theme.colors.border, accent, 0.25)),
-        StrokeKind::Middle,
-    );
-
     if let Some(app_icon) = app_icon {
-        let inner = rect.shrink(5.0);
+        let inner = rect;
         ui.painter().image(
             app_icon.id(),
             inner,

@@ -5,6 +5,7 @@ edition = "2024"
 license-file = "LICENSE"
 
 [dependencies]
+dirs = "5"
 eframe = "0.31"
 image = { version = "0.25", features = ["avif", "webp"] }
 img-parts = "0.4"

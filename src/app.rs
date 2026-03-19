@@ -15,6 +15,8 @@ pub struct CompressityApp {
     theme: AppTheme,
     app_icon: Option<TextureHandle>,
     app_settings: AppSettings,
+    /// Snapshot of settings from previous frame to detect changes and save.
+    prev_settings_snapshot: Option<AppSettings>,
 }
 
 impl CompressityApp {
@@ -24,13 +26,16 @@ impl CompressityApp {
         cc.egui_ctx
             .send_viewport_cmd(egui::ViewportCommand::Maximized(true));
 
+        let app_settings = AppSettings::load();
+
         Self {
             active_module: None,
             compress_photos: CompressPhotosPage::default(),
             show_about: false,
             theme,
             app_icon: branding::load_app_icon_texture(&cc.egui_ctx),
-            app_settings: AppSettings::default(),
+            prev_settings_snapshot: Some(app_settings.clone()),
+            app_settings,
         }
     }
 }
@@ -55,7 +60,17 @@ impl eframe::App for CompressityApp {
                             ui, ctx, &self.theme,
                             &mut self.app_settings,
                             &mut self.active_module,
-                        )
+                        );
+                        // Persist settings whenever they change while in settings view.
+                        let changed = self
+                            .prev_settings_snapshot
+                            .as_ref()
+                            .map(|prev| prev.default_output_folder != self.app_settings.default_output_folder)
+                            .unwrap_or(true);
+                        if changed {
+                            self.app_settings.save();
+                            self.prev_settings_snapshot = Some(self.app_settings.clone());
+                        }
                     }
                     Some(module) => {
                         ui::module_view::show(ui, ctx, &self.theme, module, &mut self.active_module)

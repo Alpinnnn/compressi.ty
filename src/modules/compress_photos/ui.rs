@@ -35,6 +35,11 @@ pub struct CompressPhotosPage {
     before_after_split: f32,
     preview_loader_rx: Option<mpsc::Receiver<PreviewLoadedImage>>,
     preview_loading: bool,
+    preview_load_progress: f32,
+    /// True when the output image was attempted but failed to decode (e.g. AVIF).
+    preview_output_failed: bool,
+    /// Background channel for async file loading (to avoid UI freeze on large images).
+    file_loader_rx: Option<mpsc::Receiver<FileLoadResult>>,
 }
 
 impl Default for CompressPhotosPage {
@@ -56,8 +61,16 @@ impl Default for CompressPhotosPage {
             before_after_split: 0.5,
             preview_loader_rx: None,
             preview_loading: false,
+            preview_load_progress: 0.0,
+            preview_output_failed: false,
+            file_loader_rx: None,
         }
     }
+}
+
+/// Result sent back from the async file-loading thread.
+struct FileLoadResult {
+    results: Vec<Result<LoadedPhoto, String>>,
 }
 
 struct PhotoListItem {
@@ -99,12 +112,16 @@ struct PreviewLoadedImage {
     id: u64,
     kind: PreviewKind,
     color_image: ColorImage,
+    /// How far we are through loading (0..=1), sent with each message.
+    progress: f32,
 }
 
 #[derive(Clone, Copy, PartialEq)]
 enum PreviewKind {
     Input,
     Output,
+    /// Pure progress signal — carries no texture, only the progress value.
+    Progress,
 }
 
 // ─── Spacing helpers ────────────────────────────────────────────────────────
@@ -207,27 +224,44 @@ impl CompressPhotosPage {
             loop {
                 match rx.try_recv() {
                     Ok(loaded) => {
-                        let tex = ctx.load_texture(
-                            format!("preview-{}-{:?}", loaded.id, loaded.kind as u8),
-                            loaded.color_image,
-                            TextureOptions::LINEAR,
-                        );
                         match loaded.kind {
+                            PreviewKind::Progress => {
+                                // Pure progress signal — just update the percentage
+                                self.preview_load_progress = loaded.progress;
+                            }
                             PreviewKind::Input => {
+                                self.preview_load_progress = loaded.progress;
+                                let tex = ctx.load_texture(
+                                    format!("preview-{}-input", loaded.id),
+                                    loaded.color_image,
+                                    TextureOptions::LINEAR,
+                                );
                                 self.preview_input_texture = Some((loaded.id, tex));
                             }
                             PreviewKind::Output => {
+                                self.preview_load_progress = 1.0;
+                                let tex = ctx.load_texture(
+                                    format!("preview-{}-output", loaded.id),
+                                    loaded.color_image,
+                                    TextureOptions::LINEAR,
+                                );
                                 self.preview_output_texture = Some((loaded.id, tex));
                             }
                         }
                     }
                     Err(mpsc::TryRecvError::Empty) => {
-                        // Thread still working, check again next frame
+                        // Thread still working — check again next frame
                         break;
                     }
                     Err(mpsc::TryRecvError::Disconnected) => {
-                        // Thread finished, all messages received
+                        // Thread finished. Check whether output was expected but never arrived.
+                        let had_output_slot = self.preview_output_texture.is_none()
+                            && self.preview_input_texture.is_some();
+                        if had_output_slot {
+                            self.preview_output_failed = true;
+                        }
                         self.preview_loading = false;
+                        self.preview_load_progress = 1.0;
                         self.preview_loader_rx = None;
                         break;
                     }
@@ -235,6 +269,46 @@ impl CompressPhotosPage {
             }
         }
 
+        // Poll for async-loaded files (prevents UI freeze on large images)
+        if let Some(rx) = &self.file_loader_rx {
+            loop {
+                match rx.try_recv() {
+                    Ok(batch) => {
+                        let mut added = 0usize;
+                        let mut errors: Vec<String> = Vec::new();
+                        for result in batch.results {
+                            match result {
+                                Ok(photo) => {
+                                    self.files.push(make_item(ctx, photo));
+                                    added += 1;
+                                }
+                                Err(e) => errors.push(e),
+                            }
+                        }
+                        if !errors.is_empty() {
+                            self.banner = Some(BannerMessage {
+                                tone: BannerTone::Error,
+                                text: errors.join("  "),
+                            });
+                        } else if added > 0 {
+                            self.banner = Some(BannerMessage {
+                                tone: BannerTone::Info,
+                                text: format!("Added {added} image(s) to the queue."),
+                            });
+                        }
+                    }
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        self.file_loader_rx = None;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if self.file_loader_rx.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(50));
+        }
         if self.preview_loading {
             ctx.request_repaint_after(Duration::from_millis(30));
         }
@@ -242,12 +316,26 @@ impl CompressPhotosPage {
 
     fn spawn_preview_load(&mut self, ctx: &egui::Context, id: u64, input_path: PathBuf, output_path: Option<PathBuf>) {
         self.preview_loading = true;
+        self.preview_load_progress = 0.0;
+        self.preview_output_failed = false;
+        let has_output = output_path.is_some();
         let (tx, rx) = mpsc::channel();
         self.preview_loader_rx = Some(rx);
         let repaint_ctx = ctx.clone();
 
         std::thread::spawn(move || {
-            // Load input image
+            // Immediately signal thread start so UI shows > 0% right away,
+            // even before the (potentially slow) image decode begins.
+            let _ = tx.send(PreviewLoadedImage {
+                id,
+                kind: PreviewKind::Progress,
+                color_image: ColorImage::new([1, 1], egui::Color32::TRANSPARENT),
+                progress: 0.08,
+            });
+            repaint_ctx.request_repaint();
+
+            // Decode input image (brings progress to 50%, or 95% when no output)
+            let input_progress = if has_output { 0.5 } else { 0.95 };
             if let Ok(img) = image::open(&input_path) {
                 let rgba = img.to_rgba8();
                 let size = [rgba.width() as usize, rgba.height() as usize];
@@ -256,12 +344,22 @@ impl CompressPhotosPage {
                     id,
                     kind: PreviewKind::Input,
                     color_image,
+                    progress: input_progress,
                 });
                 repaint_ctx.request_repaint();
             }
 
-            // Load output image if available
+            // Decode output image if expected (brings progress to 100%)
             if let Some(out_path) = output_path {
+                // Signal that output decode has started (60%)
+                let _ = tx.send(PreviewLoadedImage {
+                    id,
+                    kind: PreviewKind::Progress,
+                    color_image: ColorImage::new([1, 1], egui::Color32::TRANSPARENT),
+                    progress: 0.60,
+                });
+                repaint_ctx.request_repaint();
+
                 if let Ok(img) = image::open(&out_path) {
                     let rgba = img.to_rgba8();
                     let size = [rgba.width() as usize, rgba.height() as usize];
@@ -270,9 +368,12 @@ impl CompressPhotosPage {
                         id,
                         kind: PreviewKind::Output,
                         color_image,
+                        progress: 1.0,
                     });
                     repaint_ctx.request_repaint();
                 }
+                // If output decode fails (e.g. AVIF not decodable), the channel
+                // disconnects and the UI marks preview_output_failed = true via poll.
             }
         });
     }
@@ -287,11 +388,10 @@ impl CompressPhotosPage {
         active_module: &mut Option<ModuleKind>,
         app_settings: &AppSettings,
     ) {
-        // Apply default output folder from global settings if no per-session override
+        // Apply default output folder from global settings — only when the user
+        // hasn't explicitly chosen a different folder for this session.
         if !self.output_dir_user_set {
-            if let Some(ref default_dir) = app_settings.default_output_folder {
-                self.output_dir = Some(default_dir.clone());
-            }
+            self.output_dir = app_settings.default_output_folder.clone();
         }
         self.handle_dropped_files(ctx);
         flush(ui);
@@ -515,7 +615,7 @@ impl CompressPhotosPage {
         ui: &mut Ui,
         theme: &AppTheme,
         active_module: &mut Option<ModuleKind>,
-        ctx: &egui::Context,
+        _ctx: &egui::Context,
     ) {
         let output_dir = self.last_output_dir.clone();
 
@@ -877,12 +977,18 @@ impl CompressPhotosPage {
                     self.preview_offset += img_resp.drag_delta();
                 }
 
-                // Render the preview
+                // ── Render preview ──────────────────────────────────────────────
                 let has_output_tex = is_done
                     && self.preview_output_texture.as_ref().map(|(id, _)| *id) == Some(sel_id);
+                let output_failed = self.preview_output_failed;
 
+                // Local copies of the slider state to avoid borrow conflicts
+                let split = self.before_after_split;
+                let zoom = self.preview_zoom;
+                let offset = self.preview_offset;
+
+                // Done + output texture loaded → full before/after slider
                 if has_output_tex {
-                    // ── Before/After slider ──
                     let orig_tex = self.preview_input_texture.as_ref()
                         .filter(|(id, _)| *id == sel_id)
                         .map(|(_, t)| t);
@@ -892,130 +998,101 @@ impl CompressPhotosPage {
                         let clip = ui.painter().with_clip_rect(img_rect);
                         let orig_size = orig.size_vec2();
                         let scale = (img_rect.width() / orig_size.x)
-                            .min(img_rect.height() / orig_size.y)
-                            * self.preview_zoom;
-                        let display_size = orig_size * scale;
-                        let center = img_rect.center() + self.preview_offset;
-                        let img_draw_rect = Rect::from_center_size(center, display_size);
+                            .min(img_rect.height() / orig_size.y) * zoom;
+                        let img_draw_rect = Rect::from_center_size(
+                            img_rect.center() + offset, orig_size * scale,
+                        );
+                        let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+                        let split_x = img_rect.left() + img_rect.width() * split;
 
-                        let split_x = img_rect.left()
-                            + img_rect.width() * self.before_after_split;
+                        clip.with_clip_rect(Rect::from_min_max(img_rect.min, pos2(split_x, img_rect.max.y)))
+                            .image(orig.id(), img_draw_rect, uv, Color32::WHITE);
+                        clip.with_clip_rect(Rect::from_min_max(pos2(split_x, img_rect.min.y), img_rect.max))
+                            .image(out.id(), img_draw_rect, uv, Color32::WHITE);
 
-                        // Left side: original (clipped to left of split)
-                        let left_clip = Rect::from_min_max(
-                            img_rect.min,
-                            pos2(split_x, img_rect.max.y),
-                        );
-                        ui.painter().with_clip_rect(left_clip).image(
-                            orig.id(),
-                            img_draw_rect,
-                            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                            Color32::WHITE,
-                        );
+                        let new_split = draw_slider_chrome(ui, &clip, img_rect, split, sel_id, theme);
+                        self.before_after_split = new_split;
+                    }
 
-                        // Right side: compressed (clipped to right of split)
-                        let right_clip = Rect::from_min_max(
-                            pos2(split_x, img_rect.min.y),
-                            img_rect.max,
-                        );
-                        ui.painter().with_clip_rect(right_clip).image(
-                            out.id(),
-                            img_draw_rect,
-                            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                            Color32::WHITE,
-                        );
+                // Done + output decode failed (e.g. AVIF) → slider with input on both sides
+                } else if is_done && output_failed {
+                    let input_tex = self.preview_input_texture.as_ref()
+                        .filter(|(id, _)| *id == sel_id)
+                        .map(|(_, t)| t);
 
-                        // Divider line
-                        clip.vline(
-                            split_x,
-                            img_rect.y_range(),
-                            Stroke::new(2.0, theme.colors.accent),
+                    if let Some(tex) = input_tex {
+                        let clip = ui.painter().with_clip_rect(img_rect);
+                        let tex_size = tex.size_vec2();
+                        let scale = (img_rect.width() / tex_size.x)
+                            .min(img_rect.height() / tex_size.y) * zoom;
+                        let img_draw_rect = Rect::from_center_size(
+                            img_rect.center() + offset, tex_size * scale,
                         );
+                        let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+                        clip.image(tex.id(), img_draw_rect, uv, Color32::WHITE);
 
-                        // Divider handle
-                        let handle_size = vec2(28.0, 20.0);
-                        let handle_rect = Rect::from_center_size(
-                            pos2(split_x, img_rect.center().y),
-                            handle_size,
+                        let new_split = draw_slider_chrome(ui, &clip, img_rect, split, sel_id, theme);
+                        self.before_after_split = new_split;
+
+                        // Overlay notice
+                        let bg = egui::Color32::from_rgba_premultiplied(0, 0, 0, 160);
+                        let label_rect = Rect::from_min_max(
+                            pos2(img_rect.left(), img_rect.bottom() - 22.0), img_rect.max,
                         );
-                        clip.rect_filled(handle_rect, CornerRadius::same(3), theme.colors.accent);
-                        clip.text(
-                            handle_rect.center(),
+                        ui.painter().rect_filled(label_rect, CornerRadius::ZERO, bg);
+                        ui.painter().text(
+                            pos2(img_rect.center().x, img_rect.bottom() - 11.0),
                             egui::Align2::CENTER_CENTER,
-                            "< >",
-                            egui::FontId::proportional(11.0),
-                            Color32::BLACK,
+                            "After preview unavailable for AVIF \u{2014} file was compressed successfully",
+                            egui::FontId::proportional(10.0), theme.colors.fg_dim,
                         );
-
-                        // Drag the divider
-                        let divider_resp = ui.interact(
-                            Rect::from_center_size(
-                                pos2(split_x, img_rect.center().y),
-                                vec2(20.0, img_rect.height()),
-                            ),
-                            Id::new("ba_slider").with(sel_id),
-                            Sense::drag(),
-                        );
-                        if divider_resp.dragged() {
-                            let dx = divider_resp.drag_delta().x;
-                            self.before_after_split =
-                                (self.before_after_split + dx / img_rect.width()).clamp(0.02, 0.98);
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeColumn);
-                        } else if divider_resp.hovered() {
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeColumn);
-                        }
-
-                        // Labels
-                        clip.text(
-                            pos2(img_rect.left() + 8.0, img_rect.top() + 8.0),
-                            egui::Align2::LEFT_TOP,
-                            "Before",
-                            egui::FontId::proportional(11.0),
-                            theme.colors.fg_dim,
-                        );
-                        clip.text(
-                            pos2(img_rect.right() - 8.0, img_rect.top() + 8.0),
-                            egui::Align2::RIGHT_TOP,
-                            "After",
-                            egui::FontId::proportional(11.0),
-                            theme.colors.positive,
+                    } else if self.preview_loading {
+                        let pct = (self.preview_load_progress * 100.0) as u32;
+                        ui.painter().text(
+                            img_rect.center(), egui::Align2::CENTER_CENTER,
+                            format!("Loading preview\u{2026} {pct}%"),
+                            egui::FontId::proportional(13.0), theme.colors.fg_muted,
                         );
                     }
+
+                // Not done or still loading → simple single-image preview
                 } else {
                     let preview_tex = self.preview_input_texture.as_ref()
                         .filter(|(id, _)| *id == sel_id)
                         .map(|(_, t)| t);
 
                     if let Some(tex) = preview_tex {
-                        // ── Normal preview (non-Done or no output tex) ──
                         let tex_size = tex.size_vec2();
                         let scale = (img_rect.width() / tex_size.x)
-                            .min(img_rect.height() / tex_size.y)
-                            * self.preview_zoom;
+                            .min(img_rect.height() / tex_size.y) * zoom;
                         let display_size = tex_size * scale;
-                        let center = img_rect.center() + self.preview_offset;
-
                         ui.painter().with_clip_rect(img_rect).image(
                             tex.id(),
-                            Rect::from_center_size(center, display_size),
+                            Rect::from_center_size(img_rect.center() + offset, display_size),
                             Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
                             Color32::WHITE,
                         );
+                        if self.preview_loading {
+                            let pct = (self.preview_load_progress * 100.0) as u32;
+                            ui.painter().text(
+                                pos2(img_rect.left() + 8.0, img_rect.bottom() - 8.0),
+                                egui::Align2::LEFT_BOTTOM,
+                                format!("Loading preview\u{2026} {pct}%"),
+                                egui::FontId::proportional(11.0), theme.colors.fg_muted,
+                            );
+                        }
                     } else if self.preview_loading {
+                        let pct = (self.preview_load_progress * 100.0) as u32;
                         ui.painter().text(
-                            img_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            "Loading preview…",
-                            egui::FontId::proportional(13.0),
-                            theme.colors.fg_muted,
+                            img_rect.center(), egui::Align2::CENTER_CENTER,
+                            format!("Loading preview\u{2026} {pct}%"),
+                            egui::FontId::proportional(13.0), theme.colors.fg_muted,
                         );
                     } else {
                         ui.painter().text(
-                            img_rect.center(),
-                            egui::Align2::CENTER_CENTER,
+                            img_rect.center(), egui::Align2::CENTER_CENTER,
                             "Preview not available",
-                            egui::FontId::proportional(13.0),
-                            theme.colors.fg_muted,
+                            egui::FontId::proportional(13.0), theme.colors.fg_muted,
                         );
                     }
                 }
@@ -1316,9 +1393,10 @@ impl CompressPhotosPage {
                         None
                     };
 
-                    // Clear stale textures
+                    // Clear stale textures and failure flags
                     self.preview_input_texture = None;
                     self.preview_output_texture = None;
+                    self.preview_output_failed = false;
 
                     // Spawn async load
                     self.spawn_preview_load(ui.ctx(), id, input_path, output_path);
@@ -1355,35 +1433,38 @@ impl CompressPhotosPage {
         }
     }
 
-    fn add_paths(&mut self, ctx: &egui::Context, paths: Vec<PathBuf>) {
-        let mut added = 0usize;
-        let mut rejected = Vec::new();
+    fn add_paths(&mut self, _ctx: &egui::Context, paths: Vec<PathBuf>) {
+        // Only skip paths already in the queue that are still "Ready" (not yet compressed).
+        // Completed / failed / cancelled items can be re-added as fresh queue entries.
+        let new_paths: Vec<PathBuf> = paths
+            .into_iter()
+            .filter(|p| {
+                !self.files.iter().any(|i| {
+                    i.asset.path == *p && matches!(i.state, CompressionState::Ready)
+                })
+            })
+            .collect();
 
-        for path in paths {
-            if self.files.iter().any(|i| i.asset.path == path) {
-                continue;
-            }
-            self.next_file_id += 1;
-            match compressor::load_photo(path, self.next_file_id) {
-                Ok(photo) => {
-                    self.files.push(make_item(ctx, photo));
-                    added += 1;
-                }
-                Err(e) => rejected.push(e),
-            }
+        if new_paths.is_empty() {
+            return;
         }
 
-        if !rejected.is_empty() {
-            self.banner = Some(BannerMessage {
-                tone: BannerTone::Error,
-                text: rejected.join("  "),
-            });
-        } else if added > 0 {
-            self.banner = Some(BannerMessage {
-                tone: BannerTone::Info,
-                text: format!("Added {added} image(s) to the queue."),
-            });
-        }
+        // Spawn a background thread to load the images so large files
+        // don't block the UI (fixes freeze on high-resolution images).
+        let (tx, rx) = mpsc::channel::<FileLoadResult>();
+        self.file_loader_rx = Some(rx);
+
+        let mut start_id = self.next_file_id;
+        self.next_file_id += new_paths.len() as u64;
+
+        std::thread::spawn(move || {
+            let mut results = Vec::with_capacity(new_paths.len());
+            for path in new_paths {
+                start_id += 1;
+                results.push(compressor::load_photo(path, start_id));
+            }
+            let _ = tx.send(FileLoadResult { results });
+        });
     }
 
     fn start_compression(&mut self) {
@@ -1399,7 +1480,7 @@ impl CompressPhotosPage {
                 self.active_batch = Some(handle);
                 self.banner = Some(BannerMessage {
                     tone: BannerTone::Info,
-                    text: "Compression started — UI stays interactive.".into(),
+                    text: "Compression started.".into(),
                 });
             }
             Err(e) => {
@@ -1450,6 +1531,61 @@ fn make_item(ctx: &egui::Context, photo: LoadedPhoto) -> PhotoListItem {
     }
 }
 
+/// Renders the before/after divider line, handle, labels, and drag interaction.
+/// Returns the (possibly updated) split fraction so the caller can persist it.
+fn draw_slider_chrome(
+    ui: &mut Ui,
+    clip: &egui::Painter,
+    img_rect: Rect,
+    split: f32,
+    sel_id: u64,
+    theme: &AppTheme,
+) -> f32 {
+    let split_x = img_rect.left() + img_rect.width() * split;
+
+    // Divider line
+    clip.vline(split_x, img_rect.y_range(), Stroke::new(2.0, theme.colors.accent));
+
+    // Handle
+    let handle_rect = Rect::from_center_size(pos2(split_x, img_rect.center().y), vec2(28.0, 20.0));
+    clip.rect_filled(handle_rect, CornerRadius::same(3), theme.colors.accent);
+    clip.text(
+        handle_rect.center(), egui::Align2::CENTER_CENTER,
+        "< >", egui::FontId::proportional(11.0), Color32::BLACK,
+    );
+
+    // Drag interaction
+    let divider_resp = ui.interact(
+        Rect::from_center_size(pos2(split_x, img_rect.center().y), vec2(20.0, img_rect.height())),
+        Id::new("ba_slider").with(sel_id),
+        Sense::drag(),
+    );
+    let new_split = if divider_resp.dragged() {
+        let dx = divider_resp.drag_delta().x;
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeColumn);
+        (split + dx / img_rect.width()).clamp(0.02, 0.98)
+    } else {
+        if divider_resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeColumn);
+        }
+        split
+    };
+
+    // Labels
+    clip.text(
+        pos2(img_rect.left() + 8.0, img_rect.top() + 8.0),
+        egui::Align2::LEFT_TOP, "Before",
+        egui::FontId::proportional(11.0), theme.colors.fg_dim,
+    );
+    clip.text(
+        pos2(img_rect.right() - 8.0, img_rect.top() + 8.0),
+        egui::Align2::RIGHT_TOP, "After",
+        egui::FontId::proportional(11.0), theme.colors.positive,
+    );
+
+    new_split
+}
+
 // ─── Queue section header ───────────────────────────────────────────────────
 
 fn queue_section_header(ui: &mut Ui, theme: &AppTheme, title: &str, count: usize, tint: Color32) {
@@ -1488,126 +1624,195 @@ fn queue_row_interactive(
     can_delete: bool,
 ) -> QueueRowAction {
     let mut action = QueueRowAction { clicked: false, deleted: false };
-    let id = Id::new("queue_row").with(item.asset.id);
+    let row_id = Id::new("queue_row").with(item.asset.id);
 
-    let frame_resp = panel::inset(theme)
-        .inner_margin(egui::Margin::same(10))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                thumb(ui, theme, item.preview_texture.as_ref(), 42.0);
-                ui.add_space(8.0);
-                ui.with_layout(Layout::top_down(Align::Min), |ui| {
-                    ui.set_width(ui.available_width() - if show_delete { 28.0 } else { 0.0 });
-                    ui.label(
-                        RichText::new(truncate_filename(&item.asset.file_name, 28))
-                            .size(12.0).strong().color(theme.colors.fg),
-                    );
-                    ui.label(
-                        RichText::new(format!(
-                            "{} · {} · {}×{}",
-                            item.asset.format.label(),
-                            fmt_bytes(item.asset.original_size),
-                            item.asset.dimensions.0,
-                            item.asset.dimensions.1
-                        ))
-                        .size(10.0).color(theme.colors.fg_dim),
-                    );
-                    // State-specific content
-                    match &item.state {
-                        CompressionState::Ready => {
-                            ui.label(
-                                RichText::new("Waiting For Compress")
-                                    .size(10.0).color(theme.colors.fg_muted),
-                            );
-                        }
-                        CompressionState::Compressing(p) => {
-                            ui.label(
-                                RichText::new("Compressing")
-                                    .size(10.0).color(theme.colors.accent),
-                            );
-                            ui.add_space(2.0);
-                            let fraction = p.progress.clamp(0.0, 1.0);
-                            let bar_h = 4.0;
-                            let bar_w = ui.available_width().max(20.0);
-                            let (bar_rect, _) = ui.allocate_exact_size(vec2(bar_w, bar_h), Sense::hover());
-                            ui.painter().rect_filled(bar_rect, CornerRadius::same(2), theme.colors.bg_raised);
-                            ui.painter().rect_stroke(bar_rect, CornerRadius::same(2), Stroke::new(0.5, theme.colors.border), StrokeKind::Middle);
-                            if fraction > 0.0 {
-                                let fill_rect = Rect::from_min_size(bar_rect.min, vec2(bar_rect.width() * fraction, bar_h));
-                                ui.painter().rect_filled(fill_rect, CornerRadius::same(2), theme.colors.accent);
-                            }
-                        }
-                        CompressionState::Completed(r) => {
-                            ui.label(
-                                RichText::new(format!(
-                                    "Done, {} → {} ({:.1}%)",
-                                    fmt_bytes(r.original_size),
-                                    fmt_bytes(r.compressed_size),
-                                    r.reduction_percent.abs()
-                                ))
-                                .size(10.0).color(theme.colors.positive),
-                            );
-                        }
-                        CompressionState::Failed(err) => {
-                            ui.label(
-                                RichText::new(format!("Failed: {err}"))
-                                    .size(10.0).color(theme.colors.negative),
-                            );
-                        }
-                        CompressionState::Cancelled => {
-                            ui.label(
-                                RichText::new("Cancelled")
-                                    .size(10.0).color(theme.colors.caution),
-                            );
-                        }
-                    }
-                });
-            });
-        });
+    // Reserve the full row rect before rendering so we can overlay the delete button
+    // on top without it disappearing when the mouse moves onto the button itself.
+    let row_width = ui.available_width();
+    // Estimate row height: thumb(42) + 2*padding(10) = 62 minimum
+    let row_height = 64.0f32;
+    let (row_rect, _) = ui.allocate_exact_size(vec2(row_width, row_height), Sense::hover());
 
-    // Click to select
-    let row_rect = frame_resp.response.rect;
-    let row_resp = ui.interact(row_rect, id.with("click"), Sense::click());
-    if row_resp.clicked() {
-        action.clicked = true;
-    }
+    // ── Row background / frame ───────────────────────────────────────────
+    let row_resp = ui.interact(row_rect, row_id.with("click"), Sense::click());
 
-    // Hover highlight
-    if row_resp.hovered() {
+    // Determine if the row or its delete button is hovered (persistent across frames)
+    let btn_size = vec2(24.0, 24.0);
+    let btn_pos = pos2(
+        row_rect.right() - btn_size.x - 8.0,
+        row_rect.center().y - btn_size.y * 0.5,
+    );
+    let btn_rect = Rect::from_min_size(btn_pos, btn_size);
+    let btn_resp = if show_delete && can_delete {
+        Some(ui.interact(btn_rect, row_id.with("trash"), Sense::click()))
+    } else {
+        None
+    };
+
+    let row_or_btn_hovered = row_resp.hovered()
+        || btn_resp.as_ref().map(|b| b.hovered()).unwrap_or(false);
+
+    // Draw inset frame background
+    let fill = theme.colors.bg_raised;
+    ui.painter().rect_filled(row_rect, CornerRadius::ZERO, fill);
+    ui.painter().rect_stroke(
+        row_rect, CornerRadius::ZERO,
+        Stroke::new(
+            1.0,
+            if row_or_btn_hovered { theme.colors.border_focus } else { theme.colors.border },
+        ),
+        StrokeKind::Middle,
+    );
+
+    // ── Row content ──────────────────────────────────────────────────────
+    let text_x = row_rect.left() + 10.0 + 42.0 + 8.0; // margin + thumb + gap
+    let text_right = if show_delete && can_delete && row_or_btn_hovered {
+        btn_rect.left() - 4.0
+    } else {
+        row_rect.right() - 10.0
+    };
+    let text_w = (text_right - text_x).max(0.0);
+    let text_y_start = row_rect.top() + 10.0;
+
+    // Draw thumbnail
+    {
+        let thumb_rect = Rect::from_min_size(
+            pos2(row_rect.left() + 10.0, row_rect.top() + 10.0),
+            vec2(42.0, 42.0),
+        );
+        ui.painter().rect_filled(thumb_rect, CornerRadius::ZERO, theme.colors.bg_base);
         ui.painter().rect_stroke(
-            row_rect, CornerRadius::ZERO,
-            Stroke::new(1.0, theme.colors.border_focus), StrokeKind::Middle,
+            thumb_rect, CornerRadius::ZERO,
+            Stroke::new(1.0, theme.colors.border), StrokeKind::Middle,
         );
-    }
-
-    // Trash button (only for Ready items, shown on hover)
-    if show_delete && can_delete && row_resp.hovered() {
-        let btn_size = vec2(24.0, 24.0);
-        let btn_pos = pos2(
-            row_rect.right() - btn_size.x - 12.0,
-            row_rect.center().y - btn_size.y * 0.5,
-        );
-        let btn_rect = Rect::from_min_size(btn_pos, btn_size);
-        let btn_resp = ui.interact(btn_rect, id.with("trash"), Sense::click());
-
-        let t = ui.ctx().animate_bool(btn_resp.id, btn_resp.hovered());
-        let fill = theme.mix(theme.colors.bg_raised, theme.colors.negative, 0.10 + t * 0.15);
-        ui.painter().rect_filled(btn_rect, CornerRadius::ZERO, fill);
-        ui.painter().rect_stroke(
-            btn_rect, CornerRadius::ZERO,
-            Stroke::new(1.0, theme.mix(theme.colors.border, theme.colors.negative, 0.3)),
-            StrokeKind::Middle,
-        );
-        ui.painter().text(
-            btn_rect.center(), egui::Align2::CENTER_CENTER,
-            icons::TRASH, icons::font_id(13.0),
-            theme.mix(theme.colors.negative, Color32::WHITE, 0.2 + t * 0.3),
-        );
-
-        if btn_resp.clicked() {
-            action.deleted = true;
+        if let Some(tex) = item.preview_texture.as_ref() {
+            let img = thumb_rect.shrink(4.0);
+            ui.painter().image(
+                tex.id(), img,
+                egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        } else {
+            ui.painter().text(
+                thumb_rect.center(), egui::Align2::CENTER_CENTER,
+                icons::IMAGE, icons::font_id(14.0), theme.colors.fg_muted,
+            );
         }
+    }
+
+    // Draw text content directly via painter so labels don't consume sense events
+    let mut y = text_y_start;
+    // File name
+    let galley = ui.painter().layout_no_wrap(
+        truncate_filename(&item.asset.file_name, 28),
+        egui::FontId::proportional(12.0),
+        theme.colors.fg,
+    );
+    ui.painter().galley(pos2(text_x, y), galley, theme.colors.fg);
+    y += 16.0;
+
+    // Meta line
+    let meta = format!(
+        "{} · {} · {}×{}",
+        item.asset.format.label(),
+        fmt_bytes(item.asset.original_size),
+        item.asset.dimensions.0,
+        item.asset.dimensions.1,
+    );
+    let meta_galley = ui.painter().layout(
+        meta,
+        egui::FontId::proportional(10.0),
+        theme.colors.fg_dim,
+        text_w,
+    );
+    ui.painter().galley(pos2(text_x, y), meta_galley, theme.colors.fg_dim);
+    y += 14.0;
+
+    // State-specific line
+    match &item.state {
+        CompressionState::Ready => {
+            let g = ui.painter().layout_no_wrap(
+                "Waiting For Compress".to_owned(),
+                egui::FontId::proportional(10.0),
+                theme.colors.fg_muted,
+            );
+            ui.painter().galley(pos2(text_x, y), g, theme.colors.fg_muted);
+        }
+        CompressionState::Compressing(p) => {
+            let g = ui.painter().layout_no_wrap(
+                "Compressing".to_owned(),
+                egui::FontId::proportional(10.0),
+                theme.colors.accent,
+            );
+            ui.painter().galley(pos2(text_x, y), g, theme.colors.accent);
+            y += 14.0;
+            // Progress bar
+            let fraction = p.progress.clamp(0.0, 1.0);
+            let bar_h = 4.0;
+            let bar_w = text_w.max(20.0);
+            let bar_rect = Rect::from_min_size(pos2(text_x, y), vec2(bar_w, bar_h));
+            ui.painter().rect_filled(bar_rect, CornerRadius::same(2), theme.colors.bg_base);
+            ui.painter().rect_stroke(
+                bar_rect, CornerRadius::same(2),
+                Stroke::new(0.5, theme.colors.border), StrokeKind::Middle,
+            );
+            if fraction > 0.0 {
+                let fill_rect = Rect::from_min_size(bar_rect.min, vec2(bar_rect.width() * fraction, bar_h));
+                ui.painter().rect_filled(fill_rect, CornerRadius::same(2), theme.colors.accent);
+            }
+        }
+        CompressionState::Completed(r) => {
+            let text = format!(
+                "Done, {} → {} ({:.1}%)",
+                fmt_bytes(r.original_size),
+                fmt_bytes(r.compressed_size),
+                r.reduction_percent.abs()
+            );
+            let g = ui.painter().layout(
+                text, egui::FontId::proportional(10.0), theme.colors.positive, text_w,
+            );
+            ui.painter().galley(pos2(text_x, y), g, theme.colors.positive);
+        }
+        CompressionState::Failed(err) => {
+            let g = ui.painter().layout(
+                format!("Failed: {err}"),
+                egui::FontId::proportional(10.0), theme.colors.negative, text_w,
+            );
+            ui.painter().galley(pos2(text_x, y), g, theme.colors.negative);
+        }
+        CompressionState::Cancelled => {
+            let g = ui.painter().layout_no_wrap(
+                "Cancelled".to_owned(),
+                egui::FontId::proportional(10.0), theme.colors.caution,
+            );
+            ui.painter().galley(pos2(text_x, y), g, theme.colors.caution);
+        }
+    }
+
+    // ── Delete button (always rendered when hovered, on top of content) ──
+    if let Some(btn) = &btn_resp {
+        if row_or_btn_hovered {
+            let t = ui.ctx().animate_bool(btn.id, btn.hovered());
+            let btn_fill = theme.mix(theme.colors.bg_raised, theme.colors.negative, 0.10 + t * 0.15);
+            ui.painter().rect_filled(btn_rect, CornerRadius::ZERO, btn_fill);
+            ui.painter().rect_stroke(
+                btn_rect, CornerRadius::ZERO,
+                Stroke::new(1.0, theme.mix(theme.colors.border, theme.colors.negative, 0.3)),
+                StrokeKind::Middle,
+            );
+            ui.painter().text(
+                btn_rect.center(), egui::Align2::CENTER_CENTER,
+                icons::TRASH, icons::font_id(13.0),
+                theme.mix(theme.colors.negative, Color32::WHITE, 0.2 + t * 0.3),
+            );
+            if btn.clicked() {
+                action.deleted = true;
+            }
+        }
+    }
+
+    if row_resp.clicked() && !action.deleted {
+        action.clicked = true;
     }
 
     action

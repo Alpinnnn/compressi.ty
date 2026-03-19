@@ -367,35 +367,54 @@ fn encode_avif(
     settings: &CompressionSettings,
     metadata: &SourceMetadata,
 ) -> Result<Vec<u8>, String> {
+    // ravif (the AVIF encoder used by the `image` crate's "avif" feature) uses its
+    // own internal rayon threadpool. When called from inside rayon::par_iter, all
+    // rayon threads are already occupied → ravif cannot acquire any → deadlock.
+    //
+    // Fix: run the entire encode on a fresh OS thread so it is completely outside
+    // rayon's pool. We block the current rayon worker until the OS thread finishes,
+    // which is safe because the OS thread does not need any rayon resources.
+
     let rgba = image.to_rgba8();
-    let mut encoded = Vec::new();
+    let width = image.width();
+    let height = image.height();
+    let quality = settings.quality;
     let speed = match settings.preset {
         CompressionPreset::MaximumQuality => 3,
         CompressionPreset::Balanced => 5,
         CompressionPreset::HighCompression => 7,
         CompressionPreset::UltraCompression => 8,
     };
+    let exif_data = metadata.exif.as_ref().map(|b| b.to_vec());
+    let icc_data = metadata.icc_profile.as_ref().map(|b| b.to_vec());
 
-    let mut encoder = AvifEncoder::new_with_speed_quality(&mut encoded, speed, settings.quality)
-        .with_num_threads(Some(1));
+    // Move everything into a dedicated OS thread and block until done.
+    let result = std::thread::spawn(move || -> Result<Vec<u8>, String> {
+        let mut encoded = Vec::new();
+        let mut encoder = AvifEncoder::new_with_speed_quality(&mut encoded, speed, quality);
 
-    if let Some(exif) = metadata.exif.clone() {
-        let _ = encoder.set_exif_metadata(exif.to_vec());
-    }
-    if let Some(icc_profile) = metadata.icc_profile.clone() {
-        let _ = encoder.set_icc_profile(icc_profile.to_vec());
-    }
+        if let Some(exif) = exif_data {
+            let _ = encoder.set_exif_metadata(exif);
+        }
+        if let Some(icc) = icc_data {
+            let _ = encoder.set_icc_profile(icc);
+        }
 
-    encoder
-        .write_image(
-            rgba.as_raw(),
-            image.width(),
-            image.height(),
-            ExtendedColorType::Rgba8,
-        )
-        .map_err(|error| format!("AVIF encode error: {error}"))?;
+        encoder
+            .write_image(
+                rgba.as_raw(),
+                width,
+                height,
+                ExtendedColorType::Rgba8,
+            )
+            .map_err(|error| format!("AVIF encode error: {error}"))?;
 
-    Ok(encoded)
+        Ok(encoded)
+    })
+    .join()
+    .map_err(|_| "AVIF encoder thread panicked".to_owned())??;
+
+    Ok(result)
 }
 
 fn apply_container_metadata(
