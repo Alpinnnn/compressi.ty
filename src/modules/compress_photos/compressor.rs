@@ -259,28 +259,13 @@ fn resize_image(image: image::DynamicImage, resize_percent: u8) -> image::Dynami
 fn resolve_output_format(
     source_format: PhotoFormat,
     settings: &CompressionSettings,
-    has_alpha: bool,
+    _has_alpha: bool,
 ) -> PhotoFormat {
-    if settings.advanced_mode {
-        return match settings.format_choice {
-            ConvertFormat::Original => source_format,
-            ConvertFormat::Jpeg => PhotoFormat::Jpeg,
-            ConvertFormat::WebP => PhotoFormat::WebP,
-            ConvertFormat::Avif => PhotoFormat::Avif,
-        };
-    }
-
-    match settings.preset {
-        CompressionPreset::MaximumQuality => source_format,
-        CompressionPreset::Balanced => {
-            if source_format == PhotoFormat::Png && !has_alpha {
-                PhotoFormat::WebP
-            } else {
-                source_format
-            }
-        }
-        CompressionPreset::HighCompression => PhotoFormat::WebP,
-        CompressionPreset::UltraCompression => PhotoFormat::Avif,
+    match settings.format_choice {
+        ConvertFormat::Original => source_format,
+        ConvertFormat::Jpeg => PhotoFormat::Jpeg,
+        ConvertFormat::WebP => PhotoFormat::WebP,
+        ConvertFormat::Avif => PhotoFormat::Avif,
     }
 }
 

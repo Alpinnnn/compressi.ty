@@ -6,7 +6,7 @@ license-file = "LICENSE"
 
 [dependencies]
 eframe = "0.31"
-image = "0.25"
+image = { version = "0.25", features = ["avif", "webp"] }
 img-parts = "0.4"
 mozjpeg = "0.10"
 open = "5.3"

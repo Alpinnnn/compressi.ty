@@ -3,6 +3,7 @@ use eframe::egui::{self, TextureHandle};
 use crate::{
     branding,
     modules::{ModuleKind, compress_photos::CompressPhotosPage},
+    settings::AppSettings,
     theme::AppTheme,
     ui,
 };
@@ -13,6 +14,7 @@ pub struct CompressityApp {
     show_about: bool,
     theme: AppTheme,
     app_icon: Option<TextureHandle>,
+    app_settings: AppSettings,
 }
 
 impl CompressityApp {
@@ -28,6 +30,7 @@ impl CompressityApp {
             show_about: false,
             theme,
             app_icon: branding::load_app_icon_texture(&cc.egui_ctx),
+            app_settings: AppSettings::default(),
         }
     }
 }
@@ -45,7 +48,14 @@ impl eframe::App for CompressityApp {
                 match self.active_module {
                     Some(ModuleKind::CompressPhotos) => {
                         self.compress_photos
-                            .show(ui, ctx, &self.theme, &mut self.active_module)
+                            .show(ui, ctx, &self.theme, &mut self.active_module, &self.app_settings)
+                    }
+                    Some(ModuleKind::Settings) => {
+                        ui::settings_view::show(
+                            ui, ctx, &self.theme,
+                            &mut self.app_settings,
+                            &mut self.active_module,
+                        )
                     }
                     Some(module) => {
                         ui::module_view::show(ui, ctx, &self.theme, module, &mut self.active_module)

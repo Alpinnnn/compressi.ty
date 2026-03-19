@@ -2,6 +2,7 @@ mod app;
 mod branding;
 mod icons;
 mod modules;
+mod settings;
 mod theme;
 mod ui;
 

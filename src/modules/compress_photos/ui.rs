@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Duration};
+use std::{path::PathBuf, sync::mpsc, time::Duration};
 
 use eframe::egui::{
     self, Align, Button, Color32, ColorImage, CornerRadius, Id, Layout, Rect, RichText,
@@ -6,7 +6,7 @@ use eframe::egui::{
     vec2,
 };
 
-use crate::{icons, modules::ModuleKind, theme::AppTheme, ui::components::panel};
+use crate::{icons, modules::ModuleKind, settings::AppSettings, theme::AppTheme, ui::components::panel};
 
 use super::{
     compressor::{self, CompressionEvent, CompressionHandle},
@@ -25,12 +25,16 @@ pub struct CompressPhotosPage {
     next_file_id: u64,
     last_output_dir: Option<PathBuf>,
     output_dir: Option<PathBuf>,
+    output_dir_user_set: bool,
     banner: Option<BannerMessage>,
     selected_file_id: Option<u64>,
     preview_zoom: f32,
     preview_offset: Vec2,
     preview_output_texture: Option<(u64, TextureHandle)>,
+    preview_input_texture: Option<(u64, TextureHandle)>,
     before_after_split: f32,
+    preview_loader_rx: Option<mpsc::Receiver<PreviewLoadedImage>>,
+    preview_loading: bool,
 }
 
 impl Default for CompressPhotosPage {
@@ -42,12 +46,16 @@ impl Default for CompressPhotosPage {
             next_file_id: 0,
             last_output_dir: None,
             output_dir: None,
+            output_dir_user_set: false,
             banner: None,
             selected_file_id: None,
             preview_zoom: 1.0,
             preview_offset: Vec2::ZERO,
             preview_output_texture: None,
+            preview_input_texture: None,
             before_after_split: 0.5,
+            preview_loader_rx: None,
+            preview_loading: false,
         }
     }
 }
@@ -85,6 +93,20 @@ impl Default for BannerTone {
     }
 }
 
+// ─── Async preview loading ──────────────────────────────────────────────────
+
+struct PreviewLoadedImage {
+    id: u64,
+    kind: PreviewKind,
+    color_image: ColorImage,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum PreviewKind {
+    Input,
+    Output,
+}
+
 // ─── Spacing helpers ────────────────────────────────────────────────────────
 
 fn flush(ui: &mut Ui) {
@@ -92,6 +114,21 @@ fn flush(ui: &mut Ui) {
 }
 fn compact(ui: &mut Ui) {
     ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+}
+
+fn truncate_filename(name: &str, max_chars: usize) -> String {
+    if name.len() <= max_chars {
+        return name.to_owned();
+    }
+    // Try to keep extension visible
+    if let Some(dot_pos) = name.rfind('.') {
+        let ext = &name[dot_pos..];
+        let stem_budget = max_chars.saturating_sub(ext.len()).saturating_sub(1);
+        if stem_budget >= 4 {
+            return format!("{}…{}", &name[..stem_budget], ext);
+        }
+    }
+    format!("{}…", &name[..max_chars.saturating_sub(1)])
 }
 
 // ─── Background polling ─────────────────────────────────────────────────────
@@ -164,6 +201,80 @@ impl CompressPhotosPage {
         if self.active_batch.is_some() {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
+
+        // Poll for loaded preview images from background thread
+        if let Some(rx) = &self.preview_loader_rx {
+            loop {
+                match rx.try_recv() {
+                    Ok(loaded) => {
+                        let tex = ctx.load_texture(
+                            format!("preview-{}-{:?}", loaded.id, loaded.kind as u8),
+                            loaded.color_image,
+                            TextureOptions::LINEAR,
+                        );
+                        match loaded.kind {
+                            PreviewKind::Input => {
+                                self.preview_input_texture = Some((loaded.id, tex));
+                            }
+                            PreviewKind::Output => {
+                                self.preview_output_texture = Some((loaded.id, tex));
+                            }
+                        }
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {
+                        // Thread still working, check again next frame
+                        break;
+                    }
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        // Thread finished, all messages received
+                        self.preview_loading = false;
+                        self.preview_loader_rx = None;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if self.preview_loading {
+            ctx.request_repaint_after(Duration::from_millis(30));
+        }
+    }
+
+    fn spawn_preview_load(&mut self, ctx: &egui::Context, id: u64, input_path: PathBuf, output_path: Option<PathBuf>) {
+        self.preview_loading = true;
+        let (tx, rx) = mpsc::channel();
+        self.preview_loader_rx = Some(rx);
+        let repaint_ctx = ctx.clone();
+
+        std::thread::spawn(move || {
+            // Load input image
+            if let Ok(img) = image::open(&input_path) {
+                let rgba = img.to_rgba8();
+                let size = [rgba.width() as usize, rgba.height() as usize];
+                let color_image = ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+                let _ = tx.send(PreviewLoadedImage {
+                    id,
+                    kind: PreviewKind::Input,
+                    color_image,
+                });
+                repaint_ctx.request_repaint();
+            }
+
+            // Load output image if available
+            if let Some(out_path) = output_path {
+                if let Ok(img) = image::open(&out_path) {
+                    let rgba = img.to_rgba8();
+                    let size = [rgba.width() as usize, rgba.height() as usize];
+                    let color_image = ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+                    let _ = tx.send(PreviewLoadedImage {
+                        id,
+                        kind: PreviewKind::Output,
+                        color_image,
+                    });
+                    repaint_ctx.request_repaint();
+                }
+            }
+        });
     }
 
     // ─── Root layout (centered, max-width, flush) ───────────────────────
@@ -174,7 +285,14 @@ impl CompressPhotosPage {
         ctx: &egui::Context,
         theme: &AppTheme,
         active_module: &mut Option<ModuleKind>,
+        app_settings: &AppSettings,
     ) {
+        // Apply default output folder from global settings if no per-session override
+        if !self.output_dir_user_set {
+            if let Some(ref default_dir) = app_settings.default_output_folder {
+                self.output_dir = Some(default_dir.clone());
+            }
+        }
         self.handle_dropped_files(ctx);
         flush(ui);
 
@@ -433,7 +551,7 @@ impl CompressPhotosPage {
                         if ui
                             .add(
                                 Button::new(
-                                    RichText::new(format!("{} Add Images", icons::ADD))
+                                    RichText::new(format!("{} Change Output", icons::FOLDER))
                                         .size(13.0)
                                         .strong()
                                         .color(Color32::BLACK),
@@ -444,7 +562,10 @@ impl CompressPhotosPage {
                             )
                             .clicked()
                         {
-                            self.select_images(ctx);
+                            if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                                self.output_dir = Some(dir);
+                                self.output_dir_user_set = true;
+                            }
                         }
 
                         if let Some(dir) = &output_dir {
@@ -533,9 +654,10 @@ impl CompressPhotosPage {
                         ui.vertical_centered(|ui| {
                             ui.label(
                                 RichText::new(if has_files {
+                                    let ready_count = self.files.iter().filter(|f| matches!(f.state, CompressionState::Ready)).count();
                                     format!(
                                         "{} image(s) ready. Drop more images here anytime.",
-                                        self.files.len()
+                                        ready_count
                                     )
                                 } else {
                                     "Drop images here to start your workspace".to_owned()
@@ -563,6 +685,7 @@ impl CompressPhotosPage {
                             if has_files {
                                 // Two buttons: Add More + Change Output
                                 ui.horizontal(|ui| {
+                                    ui.add_space((ui.available_width() - 250.0).max(0.0) / 2.0); // Center the buttons
                                     if ui
                                         .add(
                                             Button::new(
@@ -594,6 +717,7 @@ impl CompressPhotosPage {
                                     {
                                         if let Some(dir) = rfd::FileDialog::new().pick_folder() {
                                             self.output_dir = Some(dir);
+                                            self.output_dir_user_set = true;
                                         }
                                     }
                                 });
@@ -652,15 +776,33 @@ impl CompressPhotosPage {
             Some(id) => id,
             None => return,
         };
-        let item = match self.files.iter().find(|f| f.asset.id == sel_id) {
-            Some(item) => item,
-            None => {
-                self.selected_file_id = None;
-                return;
-            }
-        };
+        // Extract all data from the item in a scope to release the borrow on self.files
+        let (is_done, item_input_path, item_output_path, file_name_display) = {
+            let item = match self.files.iter().find(|f| f.asset.id == sel_id) {
+                Some(item) => item,
+                None => {
+                    self.selected_file_id = None;
+                    return;
+                }
+            };
 
-        let is_done = matches!(item.state, CompressionState::Completed(_));
+            let is_done = matches!(item.state, CompressionState::Completed(_));
+            let input_path = item.asset.path.clone();
+            let output_path = if let CompressionState::Completed(r) = &item.state {
+                Some(r.output_path.clone())
+            } else {
+                None
+            };
+            let name = truncate_filename(&item.asset.file_name, 36);
+            (is_done, input_path, output_path, name)
+        };
+        
+        if is_done && self.preview_output_texture.as_ref().map(|(id, _)| *id) != Some(sel_id) && !self.preview_loading {
+            // Async load the output texture when state changes to Completed while previewing
+            if let Some(out_path) = item_output_path.clone() {
+                self.spawn_preview_load(ctx, sel_id, item_input_path.clone(), Some(out_path));
+            }
+        }
 
         panel::card(theme)
             .inner_margin(egui::Margin::same(12))
@@ -671,7 +813,7 @@ impl CompressPhotosPage {
                 // Header with filename and close button
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(&item.asset.file_name)
+                        RichText::new(&file_name_display)
                             .size(12.0).strong().color(theme.colors.fg),
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -741,7 +883,9 @@ impl CompressPhotosPage {
 
                 if has_output_tex {
                     // ── Before/After slider ──
-                    let orig_tex = item.preview_texture.as_ref();
+                    let orig_tex = self.preview_input_texture.as_ref()
+                        .filter(|(id, _)| *id == sel_id)
+                        .map(|(_, t)| t);
                     let out_tex = self.preview_output_texture.as_ref().map(|(_, t)| t);
 
                     if let (Some(orig), Some(out)) = (orig_tex, out_tex) {
@@ -798,8 +942,8 @@ impl CompressPhotosPage {
                         clip.text(
                             handle_rect.center(),
                             egui::Align2::CENTER_CENTER,
-                            "◄►",
-                            egui::FontId::proportional(10.0),
+                            "< >",
+                            egui::FontId::proportional(11.0),
                             Color32::BLACK,
                         );
 
@@ -837,29 +981,43 @@ impl CompressPhotosPage {
                             theme.colors.positive,
                         );
                     }
-                } else if let Some(tex) = &item.preview_texture {
-                    // ── Normal preview (non-Done or no output tex) ──
-                    let tex_size = tex.size_vec2();
-                    let scale = (img_rect.width() / tex_size.x)
-                        .min(img_rect.height() / tex_size.y)
-                        * self.preview_zoom;
-                    let display_size = tex_size * scale;
-                    let center = img_rect.center() + self.preview_offset;
-
-                    ui.painter().with_clip_rect(img_rect).image(
-                        tex.id(),
-                        Rect::from_center_size(center, display_size),
-                        Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                        Color32::WHITE,
-                    );
                 } else {
-                    ui.painter().text(
-                        img_rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        "Preview not available",
-                        egui::FontId::proportional(13.0),
-                        theme.colors.fg_muted,
-                    );
+                    let preview_tex = self.preview_input_texture.as_ref()
+                        .filter(|(id, _)| *id == sel_id)
+                        .map(|(_, t)| t);
+
+                    if let Some(tex) = preview_tex {
+                        // ── Normal preview (non-Done or no output tex) ──
+                        let tex_size = tex.size_vec2();
+                        let scale = (img_rect.width() / tex_size.x)
+                            .min(img_rect.height() / tex_size.y)
+                            * self.preview_zoom;
+                        let display_size = tex_size * scale;
+                        let center = img_rect.center() + self.preview_offset;
+
+                        ui.painter().with_clip_rect(img_rect).image(
+                            tex.id(),
+                            Rect::from_center_size(center, display_size),
+                            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                            Color32::WHITE,
+                        );
+                    } else if self.preview_loading {
+                        ui.painter().text(
+                            img_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            "Loading preview…",
+                            egui::FontId::proportional(13.0),
+                            theme.colors.fg_muted,
+                        );
+                    } else {
+                        ui.painter().text(
+                            img_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            "Preview not available",
+                            egui::FontId::proportional(13.0),
+                            theme.colors.fg_muted,
+                        );
+                    }
                 }
 
                 // Change cursor on hover
@@ -1149,24 +1307,21 @@ impl CompressPhotosPage {
                 self.preview_zoom = 1.0;
                 self.preview_offset = Vec2::ZERO;
                 self.before_after_split = 0.5;
-                // Load output texture for Done items
+
                 if let Some(item) = self.files.iter().find(|f| f.asset.id == id) {
-                    if let CompressionState::Completed(r) = &item.state {
-                        if let Ok(img) = image::open(&r.output_path) {
-                            let thumb = img.thumbnail(512, 512).to_rgba8();
-                            let size = [thumb.width() as usize, thumb.height() as usize];
-                            let tex = ui.ctx().load_texture(
-                                format!("output-preview-{id}"),
-                                ColorImage::from_rgba_unmultiplied(size, thumb.as_raw()),
-                                TextureOptions::LINEAR,
-                            );
-                            self.preview_output_texture = Some((id, tex));
-                        } else {
-                            self.preview_output_texture = None;
-                        }
+                    let input_path = item.asset.path.clone();
+                    let output_path = if let CompressionState::Completed(r) = &item.state {
+                        Some(r.output_path.clone())
                     } else {
-                        self.preview_output_texture = None;
-                    }
+                        None
+                    };
+
+                    // Clear stale textures
+                    self.preview_input_texture = None;
+                    self.preview_output_texture = None;
+
+                    // Spawn async load
+                    self.spawn_preview_load(ui.ctx(), id, input_path, output_path);
                 }
             }
         }
@@ -1338,13 +1493,14 @@ fn queue_row_interactive(
     let frame_resp = panel::inset(theme)
         .inner_margin(egui::Margin::same(10))
         .show(ui, |ui| {
+            ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 thumb(ui, theme, item.preview_texture.as_ref(), 42.0);
                 ui.add_space(8.0);
                 ui.with_layout(Layout::top_down(Align::Min), |ui| {
                     ui.set_width(ui.available_width() - if show_delete { 28.0 } else { 0.0 });
                     ui.label(
-                        RichText::new(&item.asset.file_name)
+                        RichText::new(truncate_filename(&item.asset.file_name, 28))
                             .size(12.0).strong().color(theme.colors.fg),
                     );
                     ui.label(

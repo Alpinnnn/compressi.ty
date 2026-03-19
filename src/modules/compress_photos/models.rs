@@ -52,13 +52,13 @@ impl CompressionPreset {
                 quality: 64,
                 resize_percent: 88,
                 strip_metadata: true,
-                format_choice: ConvertFormat::WebP,
+                format_choice: ConvertFormat::Original,
             },
             Self::UltraCompression => PresetDefaults {
                 quality: 42,
                 resize_percent: 72,
                 strip_metadata: true,
-                format_choice: ConvertFormat::Avif,
+                format_choice: ConvertFormat::Original,
             },
         }
     }
