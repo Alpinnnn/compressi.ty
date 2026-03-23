@@ -14,28 +14,16 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
-use ffmpeg_sidecar::{
-    command::ffmpeg_is_installed,
-    download::{self, FfmpegDownloadProgressEvent},
-    ffprobe::{ffprobe_is_installed, ffprobe_path},
-    paths::ffmpeg_path,
-};
-
-use crate::modules::compress_videos::models::{
-    CodecChoice, CompressionEstimate, CompressionMode, CompressionRecommendation,
-    CompressionResult, EncoderAvailability, EngineInfo, ProcessingProgress, PreviewResult,
-    ResolutionChoice, SizeSliderRange, VideoMetadata, VideoSettings,
+use crate::{
+    modules::compress_videos::models::{
+        CodecChoice, CompressionEstimate, CompressionMode, CompressionRecommendation,
+        CompressionResult, EncoderAvailability, EngineInfo, ProcessingProgress, PreviewResult,
+        ResolutionChoice, SizeSliderRange, VideoMetadata, VideoSettings,
+    },
+    runtime,
 };
 
 const VIDEO_EXTENSIONS: [&str; 6] = ["mp4", "mov", "mkv", "webm", "avi", "m4v"];
-
-/// Events emitted while the local FFmpeg engine is being prepared.
-#[derive(Clone, Debug, PartialEq)]
-pub enum EngineEvent {
-    Progress { progress: f32, stage: String },
-    Ready(EngineInfo),
-    Failed(String),
-}
 
 /// Events emitted by preview and compression jobs.
 #[derive(Clone, Debug, PartialEq)]
@@ -93,63 +81,6 @@ pub fn is_supported_video_path(path: &Path) -> bool {
         .map(|ext| ext.to_ascii_lowercase())
         .map(|ext| VIDEO_EXTENSIONS.iter().any(|known| *known == ext))
         .unwrap_or(false)
-}
-
-/// Starts background setup for FFmpeg/ffprobe and downloads the tools when needed.
-pub fn start_engine_setup() -> Receiver<EngineEvent> {
-    let (sender, receiver) = mpsc::channel();
-
-    thread::spawn(move || {
-        let installed = ffmpeg_is_installed() && ffprobe_is_installed();
-
-        if !installed {
-            let progress_sender = sender.clone();
-            let download_result = download::auto_download_with_progress(|event| {
-                let (progress, stage) = match event {
-                    FfmpegDownloadProgressEvent::Starting => {
-                        (0.05, "Preparing video tools".to_owned())
-                    }
-                    FfmpegDownloadProgressEvent::Downloading {
-                        total_bytes,
-                        downloaded_bytes,
-                    } => {
-                        let progress = if total_bytes == 0 {
-                            0.35
-                        } else {
-                            (downloaded_bytes as f32 / total_bytes as f32).clamp(0.0, 1.0) * 0.78
-                        };
-                        (
-                            0.12 + progress,
-                            format!("Downloading FFmpeg ({})", format_bytes(downloaded_bytes)),
-                        )
-                    }
-                    FfmpegDownloadProgressEvent::UnpackingArchive => {
-                        (0.94, "Installing video tools".to_owned())
-                    }
-                    FfmpegDownloadProgressEvent::Done => (1.0, "Video tools ready".to_owned()),
-                };
-                let _ = progress_sender.send(EngineEvent::Progress { progress, stage });
-            });
-
-            if let Err(error) = download_result {
-                let _ = sender.send(EngineEvent::Failed(format!(
-                    "Could not prepare FFmpeg automatically: {error}"
-                )));
-                return;
-            }
-        }
-
-        match discover_engine() {
-            Ok(info) => {
-                let _ = sender.send(EngineEvent::Ready(info));
-            }
-            Err(error) => {
-                let _ = sender.send(EngineEvent::Failed(error));
-            }
-        }
-    });
-
-    receiver
 }
 
 /// Reads metadata for the selected video through ffprobe.
@@ -708,38 +639,6 @@ fn compress_single_video(
         output_size_bytes,
         reduction_percent,
         elapsed_secs: started_at.elapsed().as_secs_f32(),
-    })
-}
-
-fn discover_engine() -> Result<EngineInfo, String> {
-    let ffmpeg = ffmpeg_path();
-    let ffprobe = ffprobe_path();
-    let mut version_command = background_command(&ffmpeg);
-    version_command.arg("-version");
-    let version_output = run_capture(version_command).map_err(|error| {
-        format!("Could not read FFmpeg version from {}: {error}", ffmpeg.display())
-    })?;
-
-    let mut encoders_command = background_command(&ffmpeg);
-    encoders_command.arg("-hide_banner").arg("-encoders");
-    let encoders_output = run_capture(encoders_command)
-        .map_err(|error| format!("Could not inspect FFmpeg encoders: {error}"))?;
-
-    let version = version_output
-        .lines()
-        .next()
-        .map(str::trim)
-        .unwrap_or("FFmpeg");
-
-    Ok(EngineInfo {
-        version: version.to_owned(),
-        ffmpeg_path: ffmpeg,
-        ffprobe_path: ffprobe,
-        encoders: EncoderAvailability {
-            h264: encoders_output.contains(" libx264 "),
-            h265: encoders_output.contains(" libx265 "),
-            av1: encoders_output.contains(" libsvtav1 "),
-        },
     })
 }
 
@@ -1390,11 +1289,9 @@ fn resolve_output_dir(base_output_dir: Option<PathBuf>) -> Result<PathBuf, Strin
                 .duration_since(UNIX_EPOCH)
                 .map_err(|error| format!("Clock error: {error}"))?
                 .as_secs();
-            let root = std::env::current_dir()
-                .map_err(|error| format!("Could not read working directory: {error}"))?;
+            let root = runtime::default_output_root();
 
             Ok(root
-                .join("compressity-output")
                 .join("videos")
                 .join(format!("run-{timestamp}")))
         }
@@ -1622,21 +1519,6 @@ fn make_even(value: u32) -> u32 {
 
 fn format_time_arg(seconds: f32) -> String {
     format!("{seconds:.2}")
-}
-
-fn format_bytes(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
-    let mut value = bytes as f64;
-    let mut unit_index = 0usize;
-    while value >= 1024.0 && unit_index < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit_index += 1;
-    }
-    if unit_index == 0 {
-        format!("{} {}", bytes, UNITS[unit_index])
-    } else {
-        format!("{value:.1} {}", UNITS[unit_index])
-    }
 }
 
 #[derive(Default)]

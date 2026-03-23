@@ -27,6 +27,7 @@ use super::models::{
     CompressionPreset, CompressionResult, CompressionSettings, CompressionState, ConvertFormat,
     LoadedPhoto, PhotoAsset, PhotoFormat, PhotoPreview,
 };
+use crate::runtime;
 
 #[derive(Debug)]
 pub enum CompressionEvent {
@@ -528,11 +529,9 @@ fn create_output_dir() -> Result<PathBuf, String> {
         .duration_since(UNIX_EPOCH)
         .map_err(|error| format!("Clock error: {error}"))?
         .as_secs();
-    let base = std::env::current_dir()
-        .map_err(|error| format!("Could not read working directory: {error}"))?;
+    let base = runtime::default_output_root();
 
     Ok(base
-        .join("compressity-output")
         .join("photos")
         .join(format!("run-{timestamp}")))
 }

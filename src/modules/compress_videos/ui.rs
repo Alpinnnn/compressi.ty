@@ -11,12 +11,13 @@ use crate::{
     modules::{
         ModuleKind,
         compress_videos::{
+            engine::VideoEngineController,
             models::{
-                CodecChoice, CompressionMode, EngineInfo, EngineStatus,
-                ProcessingProgress, ResolutionChoice, VideoCompressionState,
-                VideoMetadata, VideoQueueItem, VideoSettings, VideoThumbnail,
+                CodecChoice, CompressionMode, EncoderAvailability, EngineStatus,
+                ProcessingProgress, ResolutionChoice, VideoCompressionState, VideoMetadata,
+                VideoQueueItem, VideoSettings, VideoThumbnail,
             },
-            processor::{self, BatchHandle, BatchItem, BatchEvent, EngineEvent},
+            processor::{self, BatchEvent, BatchHandle, BatchItem},
         },
     },
     settings::AppSettings,
@@ -31,10 +32,6 @@ pub struct CompressVideosPage {
     queue: Vec<VideoQueueItem>,
     next_id: u64,
     selected_id: Option<u64>,
-
-    engine_status: EngineStatus,
-    engine_receiver: Option<mpsc::Receiver<EngineEvent>>,
-    engine_boot_requested: bool,
 
     active_batch: Option<BatchHandle>,
     pending_probes: Vec<PendingProbe>,
@@ -51,7 +48,7 @@ pub struct CompressVideosPage {
 
 struct PendingProbe {
     id: u64,
-    file_name: String,
+    encoders: EncoderAvailability,
     receiver: mpsc::Receiver<ProbeResult>,
 }
 
@@ -78,9 +75,6 @@ impl Default for CompressVideosPage {
             queue: Vec::new(),
             next_id: 0,
             selected_id: None,
-            engine_status: EngineStatus::Checking,
-            engine_receiver: None,
-            engine_boot_requested: false,
             active_batch: None,
             pending_probes: Vec::new(),
             output_dir: None,
@@ -117,52 +111,24 @@ impl CompressVideosPage {
     }
 
     pub fn poll_background(&mut self, ctx: &egui::Context) {
-        self.poll_engine();
         self.poll_probes();
         self.poll_batch();
 
-        let busy = self.engine_receiver.is_some()
-            || !self.pending_probes.is_empty()
-            || self.active_batch.is_some();
+        let busy = !self.pending_probes.is_empty() || self.active_batch.is_some();
         if busy { ctx.request_repaint_after(Duration::from_millis(50)); }
-    }
-
-    fn poll_engine(&mut self) {
-        let mut finished = false;
-        if let Some(rx) = &self.engine_receiver {
-            while let Ok(event) = rx.try_recv() {
-                match event {
-                    EngineEvent::Progress { progress, stage } => {
-                        self.engine_status = EngineStatus::Downloading { progress, stage };
-                    }
-                    EngineEvent::Ready(info) => {
-                        self.engine_status = EngineStatus::Ready(info);
-                        finished = true;
-                    }
-                    EngineEvent::Failed(error) => {
-                        self.engine_status = EngineStatus::Failed(error);
-                        finished = true;
-                    }
-                }
-            }
-        }
-        if finished { self.engine_receiver = None; }
     }
 
     fn poll_probes(&mut self) {
         let mut completed = Vec::new();
         for (idx, probe) in self.pending_probes.iter().enumerate() {
             if let Ok(result) = probe.receiver.try_recv() {
-                completed.push((idx, probe.id, result));
+                completed.push((idx, probe.id, probe.encoders.clone(), result));
             }
         }
-        for (idx, id, probe_result) in completed.into_iter().rev() {
+        for (idx, id, encoders, probe_result) in completed.into_iter().rev() {
             self.pending_probes.remove(idx);
             match probe_result.metadata {
                 Ok(metadata) => {
-                    let encoders = self.engine_info()
-                        .map(|e| e.encoders.clone())
-                        .unwrap_or_default();
                     let range = processor::size_slider_range(&metadata);
                     let settings = VideoSettings::new(&metadata, &encoders, range);
                     if let Some(item) = self.queue.iter_mut().find(|i| i.id == id) {
@@ -242,32 +208,19 @@ impl CompressVideosPage {
         }
     }
 
-    fn engine_info(&self) -> Option<&EngineInfo> {
-        match &self.engine_status {
-            EngineStatus::Ready(info) => Some(info),
-            _ => None,
-        }
-    }
-
-    fn begin_engine_setup(&mut self) {
-        self.engine_boot_requested = true;
-        self.engine_receiver = Some(processor::start_engine_setup());
-        self.engine_status = EngineStatus::Checking;
-    }
-
     // ─── File I/O ───────────────────────────────────────────────────────
 
-    fn pick_videos(&mut self) {
+    fn pick_videos(&mut self, engine: &VideoEngineController) {
         if let Some(paths) = rfd::FileDialog::new()
             .add_filter("Videos", &["mp4", "mov", "mkv", "webm", "avi", "m4v"])
             .pick_files()
         {
-            self.add_paths(paths);
+            self.add_paths(paths, engine);
         }
     }
 
-    fn add_paths(&mut self, paths: Vec<PathBuf>) {
-        let Some(engine) = self.engine_info().cloned() else {
+    fn add_paths(&mut self, paths: Vec<PathBuf>, engine: &VideoEngineController) {
+        let Some(engine) = engine.active_info().cloned() else {
             self.banner = Some(BannerMessage {
                 tone: BannerTone::Info,
                 text: "Video tools are still being prepared. Please wait.".into(),
@@ -303,7 +256,11 @@ impl CompressVideosPage {
             });
 
             let (tx, rx) = mpsc::channel();
-            self.pending_probes.push(PendingProbe { id, file_name, receiver: rx });
+            self.pending_probes.push(PendingProbe {
+                id,
+                encoders: engine.encoders.clone(),
+                receiver: rx,
+            });
 
             let engine_clone = engine.clone();
             thread::spawn(move || {
@@ -326,17 +283,17 @@ impl CompressVideosPage {
         });
     }
 
-    fn handle_dropped_files(&mut self, ctx: &egui::Context) {
+    fn handle_dropped_files(&mut self, ctx: &egui::Context, engine: &VideoEngineController) {
         let paths = ctx.input(|i| {
             i.raw.dropped_files.iter()
                 .filter_map(|f| f.path.clone())
                 .collect::<Vec<_>>()
         });
-        if !paths.is_empty() { self.add_paths(paths); }
+        if !paths.is_empty() { self.add_paths(paths, engine); }
     }
 
-    fn start_batch_compression(&mut self) {
-        let Some(engine) = self.engine_info().cloned() else { return; };
+    fn start_batch_compression(&mut self, engine: &VideoEngineController) {
+        let Some(engine) = engine.active_info().cloned() else { return; };
 
         let items: Vec<BatchItem> = self.queue.iter()
             .filter(|i| matches!(i.state, VideoCompressionState::Ready))
@@ -379,12 +336,13 @@ impl CompressVideosPage {
         theme: &AppTheme,
         active_module: &mut Option<ModuleKind>,
         app_settings: &AppSettings,
+        engine: &mut VideoEngineController,
     ) {
-        if !self.engine_boot_requested { self.begin_engine_setup(); }
+        engine.ensure_ready();
         if !self.output_dir_user_set {
             self.output_dir = app_settings.default_output_folder.clone();
         }
-        self.handle_dropped_files(ctx);
+        self.handle_dropped_files(ctx, engine);
         flush(ui);
 
         let panel_rect = ui.max_rect();
@@ -417,8 +375,8 @@ impl CompressVideosPage {
         }
 
         // Engine status bar
-        if !matches!(self.engine_status, EngineStatus::Ready(_)) {
-            self.render_engine_status(&mut content_ui, theme);
+        if !matches!(engine.status(), EngineStatus::Ready(_)) {
+            self.render_engine_status(&mut content_ui, theme, engine);
             content_ui.add_space(12.0);
         }
 
@@ -449,9 +407,14 @@ impl CompressVideosPage {
                         Layout::top_down(Align::Min),
                         |ui| {
                             flush(ui);
-                            self.render_drop_zone(ui, ctx, theme, workspace_h * 0.45);
+                            self.render_drop_zone(ui, ctx, theme, workspace_h * 0.45, engine);
                             ui.add_space(12.0);
-                            self.render_actions(ui, theme, (workspace_h * 0.55 - 12.0).max(0.0));
+                            self.render_actions(
+                                ui,
+                                theme,
+                                (workspace_h * 0.55 - 12.0).max(0.0),
+                                engine,
+                            );
                         },
                     );
                     ui.add_space(gutter);
@@ -459,14 +422,17 @@ impl CompressVideosPage {
                     ui.allocate_ui_with_layout(
                         vec2(settings_w, workspace_h),
                         Layout::top_down(Align::Min),
-                        |ui| { flush(ui); self.render_settings_panel(ui, theme, workspace_h); },
+                        |ui| {
+                            flush(ui);
+                            self.render_settings_panel(ui, theme, workspace_h, engine);
+                        },
                     );
                 },
             );
         } else {
             // Stacked layout
             let drop_h = if has_files { workspace_h * 0.22 } else { workspace_h * 0.45 };
-            self.render_drop_zone(&mut content_ui, ctx, theme, drop_h.max(0.0));
+            self.render_drop_zone(&mut content_ui, ctx, theme, drop_h.max(0.0), engine);
             if has_files {
                 content_ui.add_space(12.0);
                 let remaining = (workspace_h - drop_h - 12.0).max(0.0);
@@ -475,9 +441,9 @@ impl CompressVideosPage {
                 let actions_h = remaining * 0.25 - 24.0;
                 self.render_queue(&mut content_ui, theme, queue_h);
                 content_ui.add_space(12.0);
-                self.render_settings_panel(&mut content_ui, theme, settings_h);
+                self.render_settings_panel(&mut content_ui, theme, settings_h, engine);
                 content_ui.add_space(12.0);
-                self.render_actions(&mut content_ui, theme, actions_h.max(0.0));
+                self.render_actions(&mut content_ui, theme, actions_h.max(0.0), engine);
             }
         }
     }
@@ -526,12 +492,17 @@ impl CompressVideosPage {
 
     // ─── Engine status ──────────────────────────────────────────────────
 
-    fn render_engine_status(&mut self, ui: &mut Ui, theme: &AppTheme) {
-        match self.engine_status.clone() {
+    fn render_engine_status(
+        &mut self,
+        ui: &mut Ui,
+        theme: &AppTheme,
+        engine: &mut VideoEngineController,
+    ) {
+        match engine.status().clone() {
             EngineStatus::Checking => {
                 panel::tinted(theme, theme.colors.accent).show(ui, |ui| {
                     ui.label(RichText::new("Preparing video tools…").size(13.0).strong().color(theme.colors.fg));
-                    ui.label(RichText::new("This only happens the first time.").size(11.5).color(theme.colors.fg_dim));
+                    ui.label(RichText::new("The bundled engine is being detected or a managed update is being prepared.").size(11.5).color(theme.colors.fg_dim));
                 });
             }
             EngineStatus::Downloading { progress, stage } => {
@@ -546,10 +517,8 @@ impl CompressVideosPage {
                     ui.label(RichText::new(&error).size(11.5).color(theme.colors.fg_dim));
                     ui.add_space(8.0);
                     ui.horizontal_wrapped(|ui| {
-                        if secondary_button(ui, theme, "Retry Setup").clicked() { self.begin_engine_setup(); }
-                        if secondary_button(ui, theme, "Open FFmpeg Download").clicked() {
-                            let _ = open::that("https://www.ffmpeg.org/download.html");
-                        }
+                        if secondary_button(ui, theme, "Retry Setup").clicked() { engine.ensure_ready(); }
+                        if secondary_button(ui, theme, "Refresh Engine").clicked() { engine.refresh(); }
                     });
                 });
             }
@@ -558,13 +527,20 @@ impl CompressVideosPage {
 
     // ─── Drop zone ──────────────────────────────────────────────────────
 
-    fn render_drop_zone(&mut self, ui: &mut Ui, ctx: &egui::Context, theme: &AppTheme, height: f32) {
+    fn render_drop_zone(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &egui::Context,
+        theme: &AppTheme,
+        height: f32,
+        engine: &VideoEngineController,
+    ) {
         let hovering = ctx.input(|i| !i.raw.hovered_files.is_empty());
         let has_files = !self.queue.is_empty();
         let accent = theme.colors.accent;
         let fill = if hovering { theme.mix(theme.colors.bg_raised, accent, 0.06) } else { theme.colors.surface };
         let stroke = Stroke::new(1.0, if hovering { theme.mix(theme.colors.border_focus, accent, 0.2) } else { theme.colors.border });
-        let ready = matches!(self.engine_status, EngineStatus::Ready(_));
+        let ready = matches!(engine.status(), EngineStatus::Ready(_));
 
         ui.allocate_ui_with_layout(vec2(ui.available_width(), height.max(0.0)), Layout::top_down(Align::Min), |ui| {
             panel::card(theme).fill(fill).stroke(stroke).inner_margin(egui::Margin::same(18)).show(ui, |ui| {
@@ -584,7 +560,7 @@ impl CompressVideosPage {
                         RichText::new(format!("{} {}", icons::VIDEO, if has_files { "Add More Videos" } else { "Select Videos" }))
                             .size(13.0).strong().color(Color32::BLACK),
                     ).fill(accent).stroke(Stroke::NONE).corner_radius(CornerRadius::ZERO)).clicked() {
-                        self.pick_videos();
+                        self.pick_videos(engine);
                     }
                     if !ready {
                         ui.add_space(4.0);
@@ -674,7 +650,13 @@ impl CompressVideosPage {
 
     // ─── Settings panel ─────────────────────────────────────────────────
 
-    fn render_settings_panel(&mut self, ui: &mut Ui, theme: &AppTheme, height: f32) {
+    fn render_settings_panel(
+        &mut self,
+        ui: &mut Ui,
+        theme: &AppTheme,
+        height: f32,
+        engine: &VideoEngineController,
+    ) {
         panel::card(theme).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
             compact(ui);
             ui.set_min_height((height - 28.0).max(0.0));
@@ -695,7 +677,10 @@ impl CompressVideosPage {
             let Some(item) = item else { return; };
             let Some(metadata) = item.metadata.clone() else { return; };
             let Some(mut settings) = item.settings.clone() else { return; };
-            let encoders = self.engine_info().map(|e| e.encoders.clone()).unwrap_or_default();
+            let encoders = engine
+                .active_info()
+                .map(|info| info.encoders.clone())
+                .unwrap_or_default();
 
             ui.label(RichText::new(format!("Settings — {}", truncate_filename(&item.file_name, 24))).size(14.0).strong().color(theme.colors.fg));
             ui.add_space(4.0);
@@ -814,7 +799,13 @@ impl CompressVideosPage {
 
     // ─── Actions panel ──────────────────────────────────────────────────
 
-    fn render_actions(&mut self, ui: &mut Ui, theme: &AppTheme, height: f32) {
+    fn render_actions(
+        &mut self,
+        ui: &mut Ui,
+        theme: &AppTheme,
+        height: f32,
+        engine: &VideoEngineController,
+    ) {
         let accent = theme.colors.accent;
         let can_go = !self.queue.is_empty() && self.active_batch.is_none()
             && self.queue.iter().any(|i| matches!(i.state, VideoCompressionState::Ready));
@@ -828,7 +819,7 @@ impl CompressVideosPage {
             ).fill(accent).stroke(Stroke::NONE).corner_radius(CornerRadius::ZERO)
                 .min_size(vec2(ui.available_width(), 34.0)),
             ).clicked() {
-                self.start_batch_compression();
+                self.start_batch_compression(engine);
             }
 
             ui.horizontal(|ui| {

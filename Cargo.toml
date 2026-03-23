@@ -16,3 +16,8 @@ rayon = "1.10"
 resvg = "0.47"
 rfd = "0.15"
 webp = "0.3"
+
+[build-dependencies]
+ico = "0.4"
+resvg = "0.47"
+winresource = "0.1"

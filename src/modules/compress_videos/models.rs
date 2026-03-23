@@ -172,6 +172,24 @@ impl EncoderAvailability {
     }
 }
 
+/// Where the active FFmpeg toolchain comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EngineSource {
+    ManagedUpdate,
+    Bundled,
+    SystemPath,
+}
+
+impl EngineSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ManagedUpdate => "Managed Update",
+            Self::Bundled => "Bundled",
+            Self::SystemPath => "System PATH",
+        }
+    }
+}
+
 /// Probed metadata for a selected video file.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VideoMetadata {
@@ -252,6 +270,7 @@ pub struct EngineInfo {
     pub ffmpeg_path: PathBuf,
     pub ffprobe_path: PathBuf,
     pub encoders: EncoderAvailability,
+    pub source: EngineSource,
 }
 
 /// High-level status for the local video engine.

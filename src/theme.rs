@@ -1,9 +1,11 @@
-use std::{fs, path::PathBuf};
-
 use eframe::egui::{
     self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Painter, Rect,
     Stroke, TextStyle, Visuals, vec2,
 };
+
+const GOOGLE_SANS_BYTES: &[u8] =
+    include_bytes!("../assets/fonts/GoogleSans-VariableFont_GRAD,opsz,wght.ttf");
+const IONICONS_BYTES: &[u8] = include_bytes!("../assets/fonts/ionicons.ttf");
 
 // ─── Fanta-Black Monochrome Palette ─────────────────────────────────────────
 
@@ -194,45 +196,9 @@ impl AppTheme {
 // ─── Font loader ────────────────────────────────────────────────────────────
 
 fn load_google_sans() -> Option<Vec<u8>> {
-    let roots = asset_roots();
-    let file_names = [
-        "GoogleSans-VariableFont_GRAD,opsz,wght.ttf",
-        "GoogleSans-Regular.ttf",
-        "GoogleSansText-Regular.ttf",
-        "GoogleSans-Medium.ttf",
-    ];
-
-    for root in roots {
-        for file_name in file_names {
-            let path = root.join("assets").join("fonts").join(file_name);
-            if let Ok(bytes) = fs::read(path) {
-                return Some(bytes);
-            }
-        }
-    }
-
-    None
+    Some(GOOGLE_SANS_BYTES.to_vec())
 }
 
 fn load_ionicons() -> Option<Vec<u8>> {
-    for root in asset_roots() {
-        let path = root.join("assets").join("fonts").join("ionicons.ttf");
-        if let Ok(bytes) = fs::read(path) {
-            return Some(bytes);
-        }
-    }
-
-    None
-}
-
-fn asset_roots() -> Vec<PathBuf> {
-    let mut roots = vec![PathBuf::from(env!("CARGO_MANIFEST_DIR"))];
-
-    if let Ok(current_dir) = std::env::current_dir() {
-        if !roots.contains(&current_dir) {
-            roots.push(current_dir);
-        }
-    }
-
-    roots
+    Some(IONICONS_BYTES.to_vec())
 }

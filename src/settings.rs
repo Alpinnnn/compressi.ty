@@ -1,5 +1,7 @@
 use std::{fs, path::PathBuf};
 
+use crate::runtime;
+
 /// Persistent application settings, serialised to a JSON file in the user's config directory.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AppSettings {
@@ -8,7 +10,7 @@ pub struct AppSettings {
 
 impl AppSettings {
     fn config_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|d| d.join("compressity").join("settings.json"))
+        runtime::config_dir().map(|dir| dir.join("settings.json"))
     }
 
     /// Load settings from disk. Returns `Default` on any error.
