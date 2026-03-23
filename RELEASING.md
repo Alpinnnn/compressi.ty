@@ -1,9 +1,9 @@
 # Release Guide
 
-## Update versi
+## Version Update
 
-1. Ubah `version = "..."` di [Cargo.toml](Cargo.toml).
-2. Commit perubahan rilis.
+1. Update `version = "..."` in [Cargo.toml](Cargo.toml).
+2. Commit the release changes.
 
 ## Output
 
@@ -15,11 +15,11 @@
 
 ## Windows
 
-Prasyarat:
+Requirements:
 
 - Rust toolchain
-- Internet untuk download FFmpeg bundle
-- Inno Setup 6 untuk membuat installer `.exe`
+- Internet access to download the bundled FFmpeg runtime
+- Inno Setup 6 to generate the final `.exe` installer
 
 Command:
 
@@ -27,30 +27,30 @@ Command:
 powershell -ExecutionPolicy Bypass -File packaging\windows\build-installer.ps1
 ```
 
-Opsi:
+Options:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File packaging\windows\build-installer.ps1 -SkipTests
 powershell -ExecutionPolicy Bypass -File packaging\windows\build-installer.ps1 -RefreshEngine
 ```
 
-Hasil:
+Result:
 
-- Selalu membuat staging bundle di `dist/windows/Compressity/`
-- Membuat installer di `dist/windows/installer/` jika Inno Setup tersedia
+- Always creates a staging bundle in `dist/windows/Compressity/`
+- Creates the installer in `dist/windows/installer/` when Inno Setup is available
 
 ## Linux
 
-Jalankan dari Linux, WSL, atau CI Linux.
+Run from Linux, WSL, or a Linux CI environment.
 
-Prasyarat:
+Requirements:
 
 - Rust toolchain
 - `bash`, `curl`, `tar`
-- Internet untuk download FFmpeg bundle
-- `appimagetool` jika ingin output `.AppImage`
+- Internet access to download the bundled FFmpeg runtime
+- `appimagetool` if `.AppImage` output is required
 
-Persiapan:
+Preparation:
 
 ```bash
 chmod +x packaging/linux/build-bundle.sh
@@ -63,20 +63,20 @@ Command:
 ./packaging/linux/build-bundle.sh
 ```
 
-Opsi:
+Options:
 
 ```bash
 ./packaging/linux/build-bundle.sh --skip-tests
 ```
 
-Hasil:
+Result:
 
-- Membuat AppDir di `dist/linux/Compressity.AppDir/`
-- Membuat tarball di `dist/linux/`
-- Membuat AppImage di `dist/linux/` jika `appimagetool` tersedia
+- Creates the AppDir in `dist/linux/Compressity.AppDir/`
+- Creates the tarball in `dist/linux/`
+- Creates the AppImage in `dist/linux/` when `appimagetool` is available
 
-## Engine bundle
+## Engine Bundle
 
-- Script packaging menyertakan FFmpeg bundle
-- Gunakan `-RefreshEngine` pada build Windows untuk mengambil bundle terbaru
-- Setelah instalasi, versi engine tetap bisa dicek dan diupdate dari Settings
+- The packaging scripts include a bundled FFmpeg runtime
+- Use `-RefreshEngine` on the Windows build to fetch the latest bundled runtime
+- After installation, engine versions can still be checked and updated from Settings

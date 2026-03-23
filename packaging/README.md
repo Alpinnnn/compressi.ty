@@ -1,6 +1,6 @@
 # Packaging
 
-Panduan lengkap ada di [RELEASING.md](../RELEASING.md).
+See [RELEASING.md](../RELEASING.md) for the full release process.
 
 ## Windows
 
@@ -15,10 +15,10 @@ Output:
 - `dist/windows/Compressity/`
 - `dist/windows/installer/Compressity-Setup-<version>.exe`
 
-Catatan:
+Notes:
 
-- Installer final membutuhkan Inno Setup 6
-- Bundle berisi aplikasi dan FFmpeg
+- The final installer requires Inno Setup 6
+- The bundle includes the application and FFmpeg
 
 ## Linux
 
@@ -34,7 +34,7 @@ Output:
 - `dist/linux/Compressity-<version>-<arch>.tar.gz`
 - `dist/linux/Compressity-<version>-<arch>.AppImage`
 
-Catatan:
+Notes:
 
-- Jalankan dari Linux, WSL, atau CI Linux
-- Output `.AppImage` dibuat hanya jika `appimagetool` tersedia
+- Run from Linux, WSL, or a Linux CI environment
+- `.AppImage` output is generated only when `appimagetool` is available
