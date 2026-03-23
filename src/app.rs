@@ -4,7 +4,9 @@ use eframe::egui::{
 
 use crate::{
     branding,
-    modules::{ModuleKind, compress_photos::CompressPhotosPage},
+    modules::{
+        ModuleKind, compress_photos::CompressPhotosPage, compress_videos::CompressVideosPage,
+    },
     settings::AppSettings,
     theme::AppTheme,
     ui,
@@ -13,6 +15,7 @@ use crate::{
 pub struct CompressityApp {
     active_module: Option<ModuleKind>,
     compress_photos: CompressPhotosPage,
+    compress_videos: CompressVideosPage,
     show_about: bool,
     show_exit_confirm: bool,
     allow_close: bool,
@@ -35,6 +38,7 @@ impl CompressityApp {
         Self {
             active_module: None,
             compress_photos: CompressPhotosPage::default(),
+            compress_videos: CompressVideosPage::default(),
             show_about: false,
             show_exit_confirm: false,
             allow_close: false,
@@ -55,7 +59,7 @@ impl CompressityApp {
             return;
         }
 
-        if self.compress_photos.is_compressing() {
+        if self.compress_photos.is_compressing() || self.compress_videos.is_compressing() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.show_exit_confirm = true;
         }
@@ -137,6 +141,7 @@ impl CompressityApp {
 
                         if exit.clicked() {
                             self.compress_photos.cancel_compression();
+                            self.compress_videos.cancel_compression();
                             self.show_exit_confirm = false;
                             self.allow_close = true;
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -154,9 +159,10 @@ impl CompressityApp {
 impl eframe::App for CompressityApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.compress_photos.poll_background(ctx);
+        self.compress_videos.poll_background(ctx);
         self.handle_close_request(ctx);
 
-        if !self.compress_photos.is_compressing() {
+        if !self.compress_photos.is_compressing() && !self.compress_videos.is_compressing() {
             self.show_exit_confirm = false;
         }
 
@@ -168,6 +174,13 @@ impl eframe::App for CompressityApp {
 
                 match self.active_module {
                     Some(ModuleKind::CompressPhotos) => self.compress_photos.show(
+                        ui,
+                        ctx,
+                        &self.theme,
+                        &mut self.active_module,
+                        &self.app_settings,
+                    ),
+                    Some(ModuleKind::CompressVideos) => self.compress_videos.show(
                         ui,
                         ctx,
                         &self.theme,

@@ -1,4 +1,5 @@
 pub mod compress_photos;
+pub mod compress_videos;
 
 use eframe::egui::Color32;
 

@@ -80,7 +80,7 @@ impl AppTheme {
         style.visuals.extreme_bg_color = self.colors.bg_base;
 
         // Widgets
-        style.visuals.widgets.noninteractive.bg_fill = self.colors.bg_raised;
+        style.visuals.widgets.noninteractive.bg_fill = self.colors.surface_hover;
         style.visuals.widgets.noninteractive.bg_stroke.color = self.colors.border;
         style.visuals.widgets.noninteractive.fg_stroke.color = self.colors.fg;
         style.visuals.widgets.inactive.bg_fill = self.colors.surface;
@@ -89,6 +89,9 @@ impl AppTheme {
         style.visuals.widgets.hovered.bg_stroke.color = self.colors.border_focus;
         style.visuals.widgets.active.bg_fill = self.colors.surface_hover;
         style.visuals.widgets.active.bg_stroke.color = self.colors.border_focus;
+
+        // Slider: show accent-coloured fill on the left of the handle
+        style.visuals.slider_trailing_fill = true;
 
         // Selection
         style.visuals.selection.bg_fill = Color32::from_rgba_premultiplied(255, 138, 62, 28);

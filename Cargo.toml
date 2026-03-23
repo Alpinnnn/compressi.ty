@@ -7,6 +7,7 @@ license-file = "LICENSE"
 [dependencies]
 dirs = "5"
 eframe = "0.31"
+ffmpeg-sidecar = "2.4"
 image = { version = "0.25", features = ["avif", "webp"] }
 img-parts = "0.4"
 mozjpeg = "0.10"
