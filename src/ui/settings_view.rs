@@ -2,7 +2,9 @@ use eframe::egui::{
     self, Align, Button, Color32, CornerRadius, Layout, RichText, ScrollArea, Stroke, Ui, vec2,
 };
 
-use crate::{icons, modules::ModuleKind, settings::AppSettings, theme::AppTheme, ui::components::panel};
+use crate::{
+    icons, modules::ModuleKind, settings::AppSettings, theme::AppTheme, ui::components::panel,
+};
 
 pub fn show(
     ui: &mut Ui,
@@ -59,9 +61,11 @@ pub fn show(
                                                 .color(theme.colors.fg),
                                         );
                                         ui.label(
-                                            RichText::new("Configure global application preferences.")
-                                                .size(12.0)
-                                                .color(theme.colors.fg_dim),
+                                            RichText::new(
+                                                "Configure global application preferences.",
+                                            )
+                                            .size(12.0)
+                                            .color(theme.colors.fg_dim),
                                         );
                                     });
                                 });

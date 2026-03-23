@@ -1,7 +1,4 @@
-use std::{
-    fs,
-    path::PathBuf,
-};
+use std::{fs, path::PathBuf};
 
 /// Persistent application settings, serialised to a JSON file in the user's config directory.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -65,7 +62,9 @@ impl AppSettings {
         let key_pos = text.find(key)?;
         let after_colon = text[key_pos + key.len()..].trim_start_matches([' ', ':', '\t']);
         if after_colon.starts_with("null") {
-            return Some(Self { default_output_folder: None });
+            return Some(Self {
+                default_output_folder: None,
+            });
         }
         if after_colon.starts_with('"') {
             let inner = &after_colon[1..];
@@ -74,7 +73,9 @@ impl AppSettings {
             // Unescape basic sequences
             let unescaped = raw.replace("\\\\", "\\").replace("\\\"", "\"");
             if unescaped.is_empty() {
-                return Some(Self { default_output_folder: None });
+                return Some(Self {
+                    default_output_folder: None,
+                });
             }
             return Some(Self {
                 default_output_folder: Some(PathBuf::from(unescaped)),
