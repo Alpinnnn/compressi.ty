@@ -1,3 +1,4 @@
+use crate::launch::LaunchImport;
 use eframe::egui::{
     self, Align, Button, Color32, CornerRadius, Layout, RichText, Stroke, TextureHandle, vec2,
 };
@@ -5,7 +6,8 @@ use eframe::egui::{
 use crate::{
     branding,
     modules::{
-        ModuleKind, compress_photos::CompressPhotosPage,
+        ModuleKind,
+        compress_photos::CompressPhotosPage,
         compress_videos::{CompressVideosPage, engine::VideoEngineController},
     },
     settings::AppSettings,
@@ -24,12 +26,13 @@ pub struct CompressityApp {
     app_icon: Option<TextureHandle>,
     app_settings: AppSettings,
     video_engine: VideoEngineController,
+    pending_launch_import: LaunchImport,
     /// Snapshot of settings from previous frame to detect changes and save.
     prev_settings_snapshot: Option<AppSettings>,
 }
 
 impl CompressityApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, pending_launch_import: LaunchImport) -> Self {
         let theme = AppTheme::default();
         theme.apply(&cc.egui_ctx);
         cc.egui_ctx
@@ -38,9 +41,10 @@ impl CompressityApp {
         let app_settings = AppSettings::load();
         let mut video_engine = VideoEngineController::default();
         video_engine.refresh();
+        let active_module = pending_launch_import.preferred_module();
 
         Self {
-            active_module: None,
+            active_module,
             compress_photos: CompressPhotosPage::default(),
             compress_videos: CompressVideosPage::default(),
             show_about: false,
@@ -49,8 +53,23 @@ impl CompressityApp {
             theme,
             app_icon: branding::load_app_icon_texture(&cc.egui_ctx),
             video_engine,
+            pending_launch_import,
             prev_settings_snapshot: Some(app_settings.clone()),
             app_settings,
+        }
+    }
+
+    fn apply_pending_launch_import(&mut self, ctx: &egui::Context) {
+        if self.pending_launch_import.has_photo_paths() {
+            let photo_paths = self.pending_launch_import.take_photo_paths();
+            self.compress_photos.queue_external_paths(ctx, photo_paths);
+        }
+
+        if self.pending_launch_import.has_video_paths() && self.video_engine.active_info().is_some()
+        {
+            let video_paths = self.pending_launch_import.take_video_paths();
+            self.compress_videos
+                .queue_external_paths(video_paths, &self.video_engine);
         }
     }
 
@@ -164,6 +183,7 @@ impl CompressityApp {
 impl eframe::App for CompressityApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.video_engine.poll(ctx);
+        self.apply_pending_launch_import(ctx);
         self.compress_photos.poll_background(ctx);
         self.compress_videos.poll_background(ctx);
         self.handle_close_request(ctx);

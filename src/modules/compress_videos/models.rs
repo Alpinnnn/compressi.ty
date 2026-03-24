@@ -9,11 +9,7 @@ pub enum CompressionMode {
 }
 
 impl CompressionMode {
-    pub const ALL: [Self; 3] = [
-        Self::ReduceSize,
-        Self::GoodQuality,
-        Self::CustomAdvanced,
-    ];
+    pub const ALL: [Self; 3] = [Self::ReduceSize, Self::GoodQuality, Self::CustomAdvanced];
 
     pub fn title(self) -> &'static str {
         match self {
@@ -119,12 +115,43 @@ impl CodecChoice {
         }
     }
 
-    pub fn encoder_name(self) -> &'static str {
+    pub fn software_encoder_name(self) -> &'static str {
         match self {
             Self::H264 => "libx264",
             Self::H265 => "libx265",
             Self::Av1 => "libsvtav1",
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EncoderBackend {
+    Software,
+    Nvidia,
+    Amd,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResolvedEncoder {
+    pub codec: CodecChoice,
+    pub backend: EncoderBackend,
+}
+
+impl ResolvedEncoder {
+    pub fn ffmpeg_name(self) -> &'static str {
+        match (self.backend, self.codec) {
+            (EncoderBackend::Software, codec) => codec.software_encoder_name(),
+            (EncoderBackend::Nvidia, CodecChoice::H264) => "h264_nvenc",
+            (EncoderBackend::Nvidia, CodecChoice::H265) => "hevc_nvenc",
+            (EncoderBackend::Nvidia, CodecChoice::Av1) => "av1_nvenc",
+            (EncoderBackend::Amd, CodecChoice::H264) => "h264_amf",
+            (EncoderBackend::Amd, CodecChoice::H265) => "hevc_amf",
+            (EncoderBackend::Amd, CodecChoice::Av1) => "av1_amf",
+        }
+    }
+
+    pub fn is_hardware(self) -> bool {
+        !matches!(self.backend, EncoderBackend::Software)
     }
 }
 
@@ -134,6 +161,12 @@ pub struct EncoderAvailability {
     pub h264: bool,
     pub h265: bool,
     pub av1: bool,
+    pub h264_nvidia: bool,
+    pub h265_nvidia: bool,
+    pub av1_nvidia: bool,
+    pub h264_amd: bool,
+    pub h265_amd: bool,
+    pub av1_amd: bool,
 }
 
 impl EncoderAvailability {
@@ -169,6 +202,20 @@ impl EncoderAvailability {
         } else {
             self.fallback_codec()
         }
+    }
+
+    pub fn resolved_encoder(&self, codec: CodecChoice) -> ResolvedEncoder {
+        let backend = match codec {
+            CodecChoice::H264 if self.h264_nvidia => EncoderBackend::Nvidia,
+            CodecChoice::H265 if self.h265_nvidia => EncoderBackend::Nvidia,
+            CodecChoice::Av1 if self.av1_nvidia => EncoderBackend::Nvidia,
+            CodecChoice::H264 if self.h264_amd => EncoderBackend::Amd,
+            CodecChoice::H265 if self.h265_amd => EncoderBackend::Amd,
+            CodecChoice::Av1 if self.av1_amd => EncoderBackend::Amd,
+            _ => EncoderBackend::Software,
+        };
+
+        ResolvedEncoder { codec, backend }
     }
 }
 
@@ -224,10 +271,16 @@ pub struct VideoSettings {
     pub custom_bitrate_kbps: u32,
     pub custom_codec: CodecChoice,
     pub custom_fps: u32,
+    pub custom_audio_enabled: bool,
+    pub custom_audio_bitrate_kbps: u32,
 }
 
 impl VideoSettings {
-    pub fn new(video: &VideoMetadata, encoders: &EncoderAvailability, range: SizeSliderRange) -> Self {
+    pub fn new(
+        video: &VideoMetadata,
+        encoders: &EncoderAvailability,
+        range: SizeSliderRange,
+    ) -> Self {
         Self {
             mode: CompressionMode::ReduceSize,
             target_size_mb: range.recommended_mb,
@@ -237,6 +290,8 @@ impl VideoSettings {
             custom_bitrate_kbps: default_custom_bitrate(video),
             custom_codec: encoders.quality_codec(),
             custom_fps: video.fps.round().clamp(12.0, 60.0) as u32,
+            custom_audio_enabled: video.has_audio,
+            custom_audio_bitrate_kbps: video.audio_bitrate_kbps.unwrap_or(128).clamp(64, 256),
         }
     }
 }
@@ -357,11 +412,42 @@ pub struct VideoQueueItem {
 }
 
 fn default_custom_bitrate(video: &VideoMetadata) -> u32 {
-    let fallback = (((video.size_bytes as f64 * 8.0) / video.duration_secs.max(1.0) as f64) / 1000.0)
+    let fallback = (((video.size_bytes as f64 * 8.0) / video.duration_secs.max(1.0) as f64)
+        / 1000.0)
         .round() as u32;
     video
         .video_bitrate_kbps
         .or(video.container_bitrate_kbps)
         .unwrap_or(fallback)
         .clamp(900, 18_000)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CodecChoice, EncoderAvailability, EncoderBackend};
+
+    #[test]
+    fn prefers_nvidia_when_available() {
+        let encoders = EncoderAvailability {
+            h264: true,
+            h264_nvidia: true,
+            ..Default::default()
+        };
+
+        let resolved = encoders.resolved_encoder(CodecChoice::H264);
+
+        assert_eq!(resolved.backend, EncoderBackend::Nvidia);
+    }
+
+    #[test]
+    fn falls_back_to_software_when_gpu_backend_is_missing() {
+        let encoders = EncoderAvailability {
+            h265: true,
+            ..Default::default()
+        };
+
+        let resolved = encoders.resolved_encoder(CodecChoice::H265);
+
+        assert_eq!(resolved.backend, EncoderBackend::Software);
+    }
 }

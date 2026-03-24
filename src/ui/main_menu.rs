@@ -14,6 +14,8 @@ const MAIN_MENU_MODULES: [ModuleKind; 5] = [
     ModuleKind::CompressVideos,
     ModuleKind::ArchiveExtract,
 ];
+const GITHUB_URL: &str = "https://github.com/Alpinnnn/compressi.ty";
+const SUPPORT_URL: &str = "https://trakteer.id/euphyfve/tip";
 
 pub fn show(
     ui: &mut Ui,
@@ -171,10 +173,41 @@ fn render_about_window(ctx: &egui::Context, theme: &AppTheme, show_about: &mut b
             );
             ui.add_space(12.0);
             ui.label(
-                RichText::new("Local-first compression toolkit.")
+                RichText::new("The only compression tool you'll ever need!")
                     .size(13.0)
                     .color(theme.colors.fg_dim),
             );
+            ui.add_space(14.0);
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .add(
+                        Button::new(
+                            RichText::new("GitHub")
+                                .size(12.0)
+                                .strong()
+                                .color(Color32::BLACK),
+                        )
+                        .fill(theme.colors.accent)
+                        .stroke(Stroke::NONE)
+                        .corner_radius(CornerRadius::ZERO),
+                    )
+                    .clicked()
+                {
+                    let _ = open::that(GITHUB_URL);
+                }
+
+                if ui
+                    .add(
+                        Button::new(RichText::new("Support").size(12.0).color(theme.colors.fg))
+                            .fill(theme.colors.bg_raised)
+                            .stroke(Stroke::new(1.0, theme.colors.border))
+                            .corner_radius(CornerRadius::ZERO),
+                    )
+                    .clicked()
+                {
+                    let _ = open::that(SUPPORT_URL);
+                }
+            });
         });
 }
 

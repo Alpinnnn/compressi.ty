@@ -17,8 +17,9 @@ use std::{
 use crate::{
     modules::compress_videos::models::{
         CodecChoice, CompressionEstimate, CompressionMode, CompressionRecommendation,
-        CompressionResult, EncoderAvailability, EngineInfo, ProcessingProgress, PreviewResult,
-        ResolutionChoice, SizeSliderRange, VideoMetadata, VideoSettings,
+        CompressionResult, EncoderAvailability, EncoderBackend, EngineInfo, PreviewResult,
+        ProcessingProgress, ResolutionChoice, ResolvedEncoder, SizeSliderRange, VideoMetadata,
+        VideoSettings,
     },
     runtime,
 };
@@ -57,11 +58,11 @@ impl JobHandle {
 
 #[derive(Clone)]
 struct EncodePlan {
-    codec: CodecChoice,
+    encoder: ResolvedEncoder,
     video_bitrate_kbps: u32,
     audio_bitrate_kbps: Option<u32>,
     crf: Option<u8>,
-    preset: String,
+    preset: Option<String>,
     output_width: u32,
     output_height: u32,
     output_fps: f32,
@@ -105,8 +106,8 @@ pub fn probe_video(engine: &EngineInfo, path: PathBuf) -> Result<VideoMetadata, 
 /// Computes the adaptive range used by the target size slider.
 pub fn size_slider_range(video: &VideoMetadata) -> SizeSliderRange {
     let original_mb = video.original_size_mb().max(6);
-    let min_mb = ((original_mb as f32 * 0.08).round() as u32)
-        .clamp(4, original_mb.saturating_sub(1).max(4));
+    let min_mb =
+        ((original_mb as f32 * 0.08).round() as u32).clamp(4, original_mb.saturating_sub(1).max(4));
     let max_mb =
         ((original_mb as f32 * 0.85).round() as u32).clamp(min_mb + 1, original_mb.max(min_mb + 1));
     let recommended_mb =
@@ -162,8 +163,7 @@ pub fn start_preview(
     })?;
 
     let original_path = preview_dir.join(build_output_name(&video.path, "preview-source", "mp4"));
-    let compressed_path =
-        preview_dir.join(build_output_name(&video.path, "preview-result", "mp4"));
+    let compressed_path = preview_dir.join(build_output_name(&video.path, "preview-result", "mp4"));
     let start_secs = preview_start(video.duration_secs);
 
     let (sender, receiver) = mpsc::channel();
@@ -414,11 +414,24 @@ pub fn start_compression(
 /// Events emitted during batch video compression.
 #[derive(Clone, Debug)]
 pub enum BatchEvent {
-    VideoStarted { id: u64 },
-    VideoProgress { id: u64, progress: ProcessingProgress },
-    VideoFinished { id: u64, result: CompressionResult },
-    VideoFailed { id: u64, error: String },
-    BatchFinished { cancelled: bool },
+    VideoStarted {
+        id: u64,
+    },
+    VideoProgress {
+        id: u64,
+        progress: ProcessingProgress,
+    },
+    VideoFinished {
+        id: u64,
+        result: CompressionResult,
+    },
+    VideoFailed {
+        id: u64,
+        error: String,
+    },
+    BatchFinished {
+        cancelled: bool,
+    },
 }
 
 /// Handle for a running batch video compression job.
@@ -492,10 +505,7 @@ pub fn start_video_batch(
                         let _ = sender.send(BatchEvent::BatchFinished { cancelled: true });
                         return;
                     }
-                    let _ = sender.send(BatchEvent::VideoFailed {
-                        id: item.id,
-                        error,
-                    });
+                    let _ = sender.send(BatchEvent::VideoFailed { id: item.id, error });
                 }
             }
         }
@@ -537,10 +547,7 @@ fn compress_single_video(
                 break;
             }
             if let JobEvent::Progress(p) = event {
-                let _ = batch_tx.send(BatchEvent::VideoProgress {
-                    id,
-                    progress: p,
-                });
+                let _ = batch_tx.send(BatchEvent::VideoProgress { id, progress: p });
             }
         }
     });
@@ -661,7 +668,10 @@ fn parse_ffprobe_output(path: PathBuf, output: &str) -> Result<VideoMetadata, St
             let Ok(index) = index.parse::<usize>() else {
                 continue;
             };
-            streams.entry(index).or_default().insert(field.to_owned(), value);
+            streams
+                .entry(index)
+                .or_default()
+                .insert(field.to_owned(), value);
         } else if let Some(field) = key.strip_prefix("format_") {
             format_values.insert(field.to_owned(), value);
         }
@@ -734,7 +744,10 @@ fn build_recommendation(
 
     Some(CompressionRecommendation {
         headline: format!("Recommended: Reduce to about {target_size_mb} MB"),
-        detail: format!("Save about {:.0}% for easier sharing.", saving_percent.max(0.0)),
+        detail: format!(
+            "Save about {:.0}% for easier sharing.",
+            saving_percent.max(0.0)
+        ),
         mode: CompressionMode::ReduceSize,
         target_size_mb,
     })
@@ -767,6 +780,7 @@ fn build_plan(
             }
         }
     };
+    let encoder = encoders.resolved_encoder(codec);
 
     let resolution_choice = match settings.mode {
         CompressionMode::ReduceSize => reduce_size_resolution(video, settings.target_size_mb),
@@ -785,15 +799,19 @@ fn build_plan(
                 .clamp(220, 50_000);
 
             EncodePlan {
-                codec,
+                encoder,
                 video_bitrate_kbps,
                 audio_bitrate_kbps,
                 crf: None,
-                preset: preview_preset(codec, preview_mode, true),
+                preset: encoder_preset(encoder, preview_mode, true),
                 output_width,
                 output_height,
                 output_fps,
-                pass_count: if preview_mode { 1 } else { 2 },
+                pass_count: if preview_mode || encoder.is_hardware() {
+                    1
+                } else {
+                    2
+                },
             }
         }
         CompressionMode::GoodQuality => {
@@ -803,11 +821,15 @@ fn build_plan(
                 quality_estimated_bitrate(video, settings, codec, output_width, output_height);
 
             EncodePlan {
-                codec,
+                encoder,
                 video_bitrate_kbps,
                 audio_bitrate_kbps,
-                crf: Some(crf),
-                preset: preview_preset(codec, preview_mode, false),
+                crf: if encoder.is_hardware() {
+                    None
+                } else {
+                    Some(crf)
+                },
+                preset: encoder_preset(encoder, preview_mode, false),
                 output_width,
                 output_height,
                 output_fps,
@@ -815,14 +837,18 @@ fn build_plan(
             }
         }
         CompressionMode::CustomAdvanced => {
-            let audio_bitrate_kbps = video.has_audio.then_some(quality_audio_bitrate(video));
+            let audio_bitrate_kbps = if video.has_audio && settings.custom_audio_enabled {
+                Some(settings.custom_audio_bitrate_kbps.clamp(64, 320))
+            } else {
+                None
+            };
 
             EncodePlan {
-                codec,
+                encoder,
                 video_bitrate_kbps: settings.custom_bitrate_kbps.clamp(350, 80_000),
                 audio_bitrate_kbps,
                 crf: None,
-                preset: preview_preset(codec, preview_mode, false),
+                preset: encoder_preset(encoder, preview_mode, false),
                 output_width,
                 output_height,
                 output_fps,
@@ -875,8 +901,10 @@ fn build_encode_command(
         command.arg("-vf").arg(filter);
     }
 
-    command.arg("-c:v").arg(plan.codec.encoder_name());
-    command.arg("-preset").arg(&plan.preset);
+    command.arg("-c:v").arg(plan.encoder.ffmpeg_name());
+    if let Some(preset) = &plan.preset {
+        command.arg("-preset").arg(preset);
+    }
     command.arg("-pix_fmt").arg("yuv420p");
     command.arg("-movflags").arg("+faststart");
     command.arg("-g").arg("240");
@@ -901,13 +929,15 @@ fn build_encode_command(
         command.arg("-pass").arg(if first_pass { "1" } else { "2" });
     }
 
-    match plan.codec {
+    match plan.encoder.codec {
         CodecChoice::H264 => {}
         CodecChoice::H265 => {
             command.arg("-tag:v").arg("hvc1");
         }
         CodecChoice::Av1 => {
-            command.arg("-svtav1-params").arg("tune=0");
+            if matches!(plan.encoder.backend, EncoderBackend::Software) {
+                command.arg("-svtav1-params").arg("tune=0");
+            }
         }
     }
 
@@ -1138,8 +1168,8 @@ fn quality_estimated_bitrate(
         .video_bitrate_kbps
         .or(video.container_bitrate_kbps)
         .unwrap_or_else(|| {
-            ((video.size_bytes as f64 * 8.0) / video.duration_secs.max(1.0) as f64 / 1000.0)
-                .round() as u32
+            ((video.size_bytes as f64 * 8.0) / video.duration_secs.max(1.0) as f64 / 1000.0).round()
+                as u32
         })
         .max(500);
     let quality_factor = 0.30 + (settings.quality as f32 / 100.0) * 0.52;
@@ -1203,13 +1233,22 @@ fn resolve_fps(video: &VideoMetadata, settings: &VideoSettings) -> f32 {
         CompressionMode::CustomAdvanced => settings
             .custom_fps
             .max(12)
-            .min(video.fps.round().max(12.0) as u32) as f32,
+            .min(video.fps.round().max(12.0) as u32)
+            as f32,
         _ => video.fps,
     }
 }
 
-fn preview_preset(codec: CodecChoice, preview_mode: bool, aggressive: bool) -> String {
-    match codec {
+fn encoder_preset(
+    encoder: ResolvedEncoder,
+    preview_mode: bool,
+    aggressive: bool,
+) -> Option<String> {
+    if encoder.is_hardware() {
+        return None;
+    }
+
+    Some(match encoder.codec {
         CodecChoice::H264 => {
             if preview_mode {
                 "veryfast".to_owned()
@@ -1233,7 +1272,7 @@ fn preview_preset(codec: CodecChoice, preview_mode: bool, aggressive: bool) -> S
                 "6".to_owned()
             }
         }
-    }
+    })
 }
 
 fn estimate_size_bytes(duration_secs: f32, plan: &EncodePlan) -> u64 {
@@ -1242,28 +1281,39 @@ fn estimate_size_bytes(duration_secs: f32, plan: &EncodePlan) -> u64 {
 }
 
 fn estimate_processing_time(video: &VideoMetadata, plan: &EncodePlan) -> f32 {
-    let pixel_factor =
-        (plan.output_width as f32 * plan.output_height as f32) / (1920.0 * 1080.0);
+    let pixel_factor = (plan.output_width as f32 * plan.output_height as f32) / (1920.0 * 1080.0);
     let fps_factor = (plan.output_fps / 30.0).max(0.75);
     let complexity = (pixel_factor * fps_factor).max(0.35);
-    let base_speed = match plan.codec {
-        CodecChoice::H264 => {
-            if plan.crf.is_some() {
-                1.45
-            } else {
-                1.05
+    let base_speed = match plan.encoder.backend {
+        EncoderBackend::Software => match plan.encoder.codec {
+            CodecChoice::H264 => {
+                if plan.crf.is_some() {
+                    1.45
+                } else {
+                    1.05
+                }
             }
-        }
-        CodecChoice::H265 => {
-            if plan.pass_count == 2 {
-                0.62
-            } else {
-                0.48
+            CodecChoice::H265 => {
+                if plan.pass_count == 2 {
+                    0.62
+                } else {
+                    0.48
+                }
             }
-        }
-        CodecChoice::Av1 => 0.22,
+            CodecChoice::Av1 => 0.22,
+        },
+        EncoderBackend::Nvidia => match plan.encoder.codec {
+            CodecChoice::H264 => 5.8,
+            CodecChoice::H265 => 4.4,
+            CodecChoice::Av1 => 3.0,
+        },
+        EncoderBackend::Amd => match plan.encoder.codec {
+            CodecChoice::H264 => 4.6,
+            CodecChoice::H265 => 3.5,
+            CodecChoice::Av1 => 2.4,
+        },
     };
-    let speed_x = (base_speed / complexity).clamp(0.08, 4.0);
+    let speed_x = (base_speed / complexity).clamp(0.08, 10.0);
     (video.duration_secs * plan.pass_count as f32) / speed_x
 }
 
@@ -1271,7 +1321,10 @@ fn build_filter_chain(video: &VideoMetadata, plan: &EncodePlan) -> String {
     let mut filters = Vec::new();
 
     if plan.output_width != video.width || plan.output_height != video.height {
-        filters.push(format!("scale={}:{}", plan.output_width, plan.output_height));
+        filters.push(format!(
+            "scale={}:{}",
+            plan.output_width, plan.output_height
+        ));
     }
 
     if plan.output_fps + 0.25 < video.fps {
@@ -1283,23 +1336,23 @@ fn build_filter_chain(video: &VideoMetadata, plan: &EncodePlan) -> String {
 
 fn resolve_output_dir(base_output_dir: Option<PathBuf>) -> Result<PathBuf, String> {
     match base_output_dir {
-        Some(path) => Ok(path.join("videos")),
+        Some(path) => Ok(path),
         None => {
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_err(|error| format!("Clock error: {error}"))?
                 .as_secs();
-            let root = runtime::default_output_root();
+            let root = runtime::default_video_output_root();
 
-            Ok(root
-                .join("videos")
-                .join(format!("run-{timestamp}")))
+            Ok(root.join(format!("run-{timestamp}")))
         }
     }
 }
 
 fn preview_dir() -> Result<PathBuf, String> {
-    Ok(std::env::temp_dir().join("compressity").join("video-previews"))
+    Ok(std::env::temp_dir()
+        .join("compressity")
+        .join("video-previews"))
 }
 
 fn build_output_name(source: &Path, suffix: &str, extension: &str) -> String {
@@ -1371,10 +1424,11 @@ pub fn generate_thumbnail(
     video_path: &Path,
     duration_secs: f32,
 ) -> Result<(Vec<u8>, u32, u32), String> {
-    let thumb_dir = std::env::temp_dir().join("compressity").join("video-thumbs");
-    fs::create_dir_all(&thumb_dir).map_err(|error| {
-        format!("Could not create thumbnail folder: {error}")
-    })?;
+    let thumb_dir = std::env::temp_dir()
+        .join("compressity")
+        .join("video-thumbs");
+    fs::create_dir_all(&thumb_dir)
+        .map_err(|error| format!("Could not create thumbnail folder: {error}"))?;
 
     let stem = video_path
         .file_stem()
@@ -1404,12 +1458,15 @@ pub fn generate_thumbnail(
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let detail = stderr.lines().last().unwrap_or("Thumbnail extraction failed.");
+        let detail = stderr
+            .lines()
+            .last()
+            .unwrap_or("Thumbnail extraction failed.");
         return Err(detail.to_owned());
     }
 
-    let img = image::open(&thumb_path)
-        .map_err(|error| format!("Could not decode thumbnail: {error}"))?;
+    let img =
+        image::open(&thumb_path).map_err(|error| format!("Could not decode thumbnail: {error}"))?;
     let rgba = img.to_rgba8();
     let width = rgba.width();
     let height = rgba.height();
@@ -1464,7 +1521,10 @@ fn run_capture(mut command: Command) -> Result<String, String> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let detail = stderr.lines().last().unwrap_or("Process exited unexpectedly.");
+        let detail = stderr
+            .lines()
+            .last()
+            .unwrap_or("Process exited unexpectedly.");
         return Err(detail.to_owned());
     }
 
@@ -1568,7 +1628,9 @@ struct ProgressSnapshot {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_recommendation, parse_ffprobe_output, parse_time_to_secs, size_slider_range};
+    use super::{
+        build_recommendation, parse_ffprobe_output, parse_time_to_secs, size_slider_range,
+    };
     use crate::modules::compress_videos::models::{
         CompressionMode, SizeSliderRange, VideoMetadata,
     };

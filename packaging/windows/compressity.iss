@@ -26,11 +26,13 @@ OutputDir=..\..\dist\windows\installer
 OutputBaseFilename=Compressity-Setup-{#MyAppVersion}
 Compression=lzma2/max
 SolidCompression=yes
+ChangesAssociations=yes
 
 WizardStyle=modern dark
 WizardSizePercent=120
 WizardImageFile=
 WizardSmallImageFile=..\..\assets\icon\icon.bmp
+SetupIconFile=..\..\assets\icon\icon.ico
 WizardSmallImageBackColor=none
 WizardBackImageFile=installer-bg-welcome.png
 
@@ -47,6 +49,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
+Name: "shellintegration"; Description: "Add 'Open with Compressi.ty' to supported files"; GroupDescription: "Explorer integration:"
 
 [Files]
 Source: "installer-bg-welcome.png"; Flags: dontcopy noencryption
@@ -57,6 +60,52 @@ Source: "installer-bg-ready.png"; Flags: dontcopy noencryption
 Source: "installer-bg-installing.png"; Flags: dontcopy noencryption
 Source: "installer-bg-finished.png"; Flags: dontcopy noencryption
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Registry]
+Root: HKCR; Subkey: "SystemFileAssociations\.png\shell\Compressity.Open"; ValueType: string; ValueName: ""; ValueData: "Open with Compressi.ty"; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.png\shell\Compressity.Open"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\compressity.exe,0"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.png\shell\Compressity.Open"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.png\shell\Compressity.Open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\compressity.exe"" ""%1"""; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.jpg\shell\Compressity.Open"; ValueType: string; ValueName: ""; ValueData: "Open with Compressi.ty"; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.jpg\shell\Compressity.Open"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\compressity.exe,0"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.jpg\shell\Compressity.Open"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.jpg\shell\Compressity.Open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\compressity.exe"" ""%1"""; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.jpeg\shell\Compressity.Open"; ValueType: string; ValueName: ""; ValueData: "Open with Compressi.ty"; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.jpeg\shell\Compressity.Open"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\compressity.exe,0"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.jpeg\shell\Compressity.Open"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.jpeg\shell\Compressity.Open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\compressity.exe"" ""%1"""; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.webp\shell\Compressity.Open"; ValueType: string; ValueName: ""; ValueData: "Open with Compressi.ty"; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.webp\shell\Compressity.Open"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\compressity.exe,0"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.webp\shell\Compressity.Open"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.webp\shell\Compressity.Open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\compressity.exe"" ""%1"""; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.avif\shell\Compressity.Open"; ValueType: string; ValueName: ""; ValueData: "Open with Compressi.ty"; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.avif\shell\Compressity.Open"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\compressity.exe,0"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.avif\shell\Compressity.Open"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.avif\shell\Compressity.Open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\compressity.exe"" ""%1"""; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.mp4\shell\Compressity.Open"; ValueType: string; ValueName: ""; ValueData: "Open with Compressi.ty"; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.mp4\shell\Compressity.Open"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\compressity.exe,0"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.mp4\shell\Compressity.Open"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.mp4\shell\Compressity.Open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\compressity.exe"" ""%1"""; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.mov\shell\Compressity.Open"; ValueType: string; ValueName: ""; ValueData: "Open with Compressi.ty"; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.mov\shell\Compressity.Open"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\compressity.exe,0"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.mov\shell\Compressity.Open"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.mov\shell\Compressity.Open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\compressity.exe"" ""%1"""; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.mkv\shell\Compressity.Open"; ValueType: string; ValueName: ""; ValueData: "Open with Compressi.ty"; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.mkv\shell\Compressity.Open"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\compressity.exe,0"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.mkv\shell\Compressity.Open"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.mkv\shell\Compressity.Open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\compressity.exe"" ""%1"""; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.webm\shell\Compressity.Open"; ValueType: string; ValueName: ""; ValueData: "Open with Compressi.ty"; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.webm\shell\Compressity.Open"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\compressity.exe,0"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.webm\shell\Compressity.Open"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.webm\shell\Compressity.Open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\compressity.exe"" ""%1"""; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.avi\shell\Compressity.Open"; ValueType: string; ValueName: ""; ValueData: "Open with Compressi.ty"; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.avi\shell\Compressity.Open"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\compressity.exe,0"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.avi\shell\Compressity.Open"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.avi\shell\Compressity.Open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\compressity.exe"" ""%1"""; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.m4v\shell\Compressity.Open"; ValueType: string; ValueName: ""; ValueData: "Open with Compressi.ty"; Flags: uninsdeletekey; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.m4v\shell\Compressity.Open"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\compressity.exe,0"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.m4v\shell\Compressity.Open"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Tasks: shellintegration
+Root: HKCR; Subkey: "SystemFileAssociations\.m4v\shell\Compressity.Open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\compressity.exe"" ""%1"""; Flags: uninsdeletekey; Tasks: shellintegration
 
 [Icons]
 Name: "{autoprograms}\Compressity"; Filename: "{app}\compressity.exe"

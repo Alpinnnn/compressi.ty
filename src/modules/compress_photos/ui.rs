@@ -6,7 +6,8 @@ use eframe::egui::{
 };
 
 use crate::{
-    icons, modules::ModuleKind, settings::AppSettings, theme::AppTheme, ui::components::panel,
+    icons, modules::ModuleKind, runtime, settings::AppSettings, theme::AppTheme,
+    ui::components::panel,
 };
 
 use super::{
@@ -156,6 +157,11 @@ fn truncate_filename(name: &str, max_chars: usize) -> String {
 impl CompressPhotosPage {
     pub fn is_compressing(&self) -> bool {
         self.active_batch.is_some()
+    }
+
+    /// Queues files that were opened externally through the OS shell.
+    pub(crate) fn queue_external_paths(&mut self, ctx: &egui::Context, paths: Vec<PathBuf>) {
+        self.add_paths(ctx, paths);
     }
 
     pub fn cancel_compression(&self) {
@@ -412,7 +418,7 @@ impl CompressPhotosPage {
         // Apply default output folder from global settings — only when the user
         // hasn't explicitly chosen a different folder for this session.
         if !self.output_dir_user_set {
-            self.output_dir = app_settings.default_output_folder.clone();
+            self.output_dir = app_settings.preferred_photo_output_folder();
         }
         self.handle_dropped_files(ctx);
         flush(ui);
@@ -786,11 +792,12 @@ impl CompressPhotosPage {
                                 RichText::new(if has_files {
                                     let ready_count = self.files.iter().filter(|f| matches!(f.state, CompressionState::Ready)).count();
                                     format!(
-                                        "{} image(s) ready. Drop more images here anytime.",
+                                        "{} image(s) ready. Drop more images or folders here anytime.",
                                         ready_count
                                     )
                                 } else {
-                                    "Drop images here to start your workspace".to_owned()
+                                    "Drop images or folders here to start your workspace"
+                                        .to_owned()
                                 })
                                 .size(if has_files { 13.0 } else { 16.0 })
                                 .strong()
@@ -863,7 +870,10 @@ impl CompressPhotosPage {
                                 } else {
                                     ui.add_space(6.0);
                                     ui.label(
-                                        RichText::new("Output: Auto (compressity-output/photos/)")
+                                        RichText::new(format!(
+                                            "Output: Auto ({})",
+                                            runtime::default_photo_output_root().display()
+                                        ))
                                             .size(10.0)
                                             .color(theme.colors.fg_muted),
                                     );
@@ -942,39 +952,56 @@ impl CompressPhotosPage {
                 ui.horizontal(|ui| {
                     ui.label(
                         RichText::new(&file_name_display)
-                            .size(12.0).strong().color(theme.colors.fg),
+                            .size(12.0)
+                            .strong()
+                            .color(theme.colors.fg),
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.add(
-                            Button::new(
-                                RichText::new(format!("{}", icons::CLOSE))
-                                    .family(icons::font_family())
-                                    .size(14.0).color(theme.colors.fg_dim),
+                        if ui
+                            .add(
+                                Button::new(
+                                    RichText::new(format!("{}", icons::CLOSE))
+                                        .family(icons::font_family())
+                                        .size(14.0)
+                                        .color(theme.colors.fg_dim),
+                                )
+                                .fill(Color32::TRANSPARENT)
+                                .stroke(Stroke::NONE),
                             )
-                            .fill(Color32::TRANSPARENT)
-                            .stroke(Stroke::NONE),
-                        ).clicked() {
+                            .clicked()
+                        {
                             self.selected_file_id = None;
                         }
                         // Zoom controls
-                        if ui.add(
-                            Button::new(icons::rich(icons::ZOOM_OUT, 13.0, theme.colors.fg_dim))
+                        if ui
+                            .add(
+                                Button::new(icons::rich(
+                                    icons::ZOOM_OUT,
+                                    13.0,
+                                    theme.colors.fg_dim,
+                                ))
                                 .fill(theme.colors.bg_raised)
                                 .stroke(Stroke::new(1.0, theme.colors.border))
                                 .corner_radius(CornerRadius::ZERO),
-                        ).clicked() {
+                            )
+                            .clicked()
+                        {
                             self.preview_zoom = (self.preview_zoom - 0.25).max(0.25);
                         }
                         ui.label(
                             RichText::new(format!("{:.0}%", self.preview_zoom * 100.0))
-                                .size(10.0).color(theme.colors.fg_dim),
+                                .size(10.0)
+                                .color(theme.colors.fg_dim),
                         );
-                        if ui.add(
-                            Button::new(icons::rich(icons::ZOOM_IN, 13.0, theme.colors.fg_dim))
-                                .fill(theme.colors.bg_raised)
-                                .stroke(Stroke::new(1.0, theme.colors.border))
-                                .corner_radius(CornerRadius::ZERO),
-                        ).clicked() {
+                        if ui
+                            .add(
+                                Button::new(icons::rich(icons::ZOOM_IN, 13.0, theme.colors.fg_dim))
+                                    .fill(theme.colors.bg_raised)
+                                    .stroke(Stroke::new(1.0, theme.colors.border))
+                                    .corner_radius(CornerRadius::ZERO),
+                            )
+                            .clicked()
+                        {
                             self.preview_zoom = (self.preview_zoom + 0.25).min(5.0);
                         }
                     });
@@ -986,10 +1013,13 @@ impl CompressPhotosPage {
                 let (img_rect, img_resp) = ui.allocate_exact_size(avail, Sense::click_and_drag());
 
                 // Background
-                ui.painter().rect_filled(img_rect, CornerRadius::ZERO, theme.colors.bg_base);
+                ui.painter()
+                    .rect_filled(img_rect, CornerRadius::ZERO, theme.colors.bg_base);
                 ui.painter().rect_stroke(
-                    img_rect, CornerRadius::ZERO,
-                    Stroke::new(1.0, theme.colors.border), StrokeKind::Middle,
+                    img_rect,
+                    CornerRadius::ZERO,
+                    Stroke::new(1.0, theme.colors.border),
+                    StrokeKind::Middle,
                 );
 
                 // Handle zoom with scroll
@@ -1017,7 +1047,9 @@ impl CompressPhotosPage {
 
                 // Done + output texture loaded → full before/after slider
                 if has_output_tex {
-                    let orig_tex = self.preview_input_texture.as_ref()
+                    let orig_tex = self
+                        .preview_input_texture
+                        .as_ref()
                         .filter(|(id, _)| *id == sel_id)
                         .map(|(_, t)| t);
                     let out_tex = self.preview_output_texture.as_ref().map(|(_, t)| t);
@@ -1026,35 +1058,54 @@ impl CompressPhotosPage {
                         let clip = ui.painter().with_clip_rect(img_rect);
                         let orig_size = orig.size_vec2();
                         let scale = (img_rect.width() / orig_size.x)
-                            .min(img_rect.height() / orig_size.y) * zoom;
-                        let img_draw_rect = Rect::from_center_size(
-                            img_rect.center() + offset, orig_size * scale,
-                        );
+                            .min(img_rect.height() / orig_size.y)
+                            * zoom;
+                        let img_draw_rect =
+                            Rect::from_center_size(img_rect.center() + offset, orig_size * scale);
                         let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
                         let split_x = img_rect.left() + img_rect.width() * split;
 
-                        clip.with_clip_rect(Rect::from_min_max(img_rect.min, pos2(split_x, img_rect.max.y)))
-                            .image(orig.id(), img_draw_rect, uv, Color32::WHITE);
-                        clip.with_clip_rect(Rect::from_min_max(pos2(split_x, img_rect.min.y), img_rect.max))
-                            .image(out.id(), img_draw_rect, uv, Color32::WHITE);
+                        clip.with_clip_rect(Rect::from_min_max(
+                            img_rect.min,
+                            pos2(split_x, img_rect.max.y),
+                        ))
+                        .image(
+                            orig.id(),
+                            img_draw_rect,
+                            uv,
+                            Color32::WHITE,
+                        );
+                        clip.with_clip_rect(Rect::from_min_max(
+                            pos2(split_x, img_rect.min.y),
+                            img_rect.max,
+                        ))
+                        .image(
+                            out.id(),
+                            img_draw_rect,
+                            uv,
+                            Color32::WHITE,
+                        );
 
-                        let new_split = draw_slider_chrome(ui, &clip, img_rect, split, sel_id, theme);
+                        let new_split =
+                            draw_slider_chrome(ui, &clip, img_rect, split, sel_id, theme);
                         self.before_after_split = new_split;
                     }
 
                 // Done + output decode failed (e.g. AVIF) -> show the original only.
                 } else if is_done && output_failed {
-                    let input_tex = self.preview_input_texture.as_ref()
+                    let input_tex = self
+                        .preview_input_texture
+                        .as_ref()
                         .filter(|(id, _)| *id == sel_id)
                         .map(|(_, t)| t);
 
                     if let Some(tex) = input_tex {
                         let tex_size = tex.size_vec2();
                         let scale = (img_rect.width() / tex_size.x)
-                            .min(img_rect.height() / tex_size.y) * zoom;
-                        let img_draw_rect = Rect::from_center_size(
-                            img_rect.center() + offset, tex_size * scale,
-                        );
+                            .min(img_rect.height() / tex_size.y)
+                            * zoom;
+                        let img_draw_rect =
+                            Rect::from_center_size(img_rect.center() + offset, tex_size * scale);
                         ui.painter().with_clip_rect(img_rect).image(
                             tex.id(),
                             img_draw_rect,
@@ -1065,34 +1116,41 @@ impl CompressPhotosPage {
                         // Overlay notice
                         let bg = egui::Color32::from_rgba_premultiplied(0, 0, 0, 160);
                         let label_rect = Rect::from_min_max(
-                            pos2(img_rect.left(), img_rect.bottom() - 22.0), img_rect.max,
+                            pos2(img_rect.left(), img_rect.bottom() - 22.0),
+                            img_rect.max,
                         );
                         ui.painter().rect_filled(label_rect, CornerRadius::ZERO, bg);
                         ui.painter().text(
                             pos2(img_rect.center().x, img_rect.bottom() - 11.0),
                             egui::Align2::CENTER_CENTER,
                             "AVIF output preview unavailable. Showing the original image only.",
-                            egui::FontId::proportional(10.0), theme.colors.fg_dim,
+                            egui::FontId::proportional(10.0),
+                            theme.colors.fg_dim,
                         );
                     } else if self.preview_loading {
                         let pct = (self.preview_load_progress * 100.0) as u32;
                         ui.painter().text(
-                            img_rect.center(), egui::Align2::CENTER_CENTER,
+                            img_rect.center(),
+                            egui::Align2::CENTER_CENTER,
                             format!("Loading preview\u{2026} {pct}%"),
-                            egui::FontId::proportional(13.0), theme.colors.fg_muted,
+                            egui::FontId::proportional(13.0),
+                            theme.colors.fg_muted,
                         );
                     }
 
                 // Not done or still loading → simple single-image preview
                 } else {
-                    let preview_tex = self.preview_input_texture.as_ref()
+                    let preview_tex = self
+                        .preview_input_texture
+                        .as_ref()
                         .filter(|(id, _)| *id == sel_id)
                         .map(|(_, t)| t);
 
                     if let Some(tex) = preview_tex {
                         let tex_size = tex.size_vec2();
                         let scale = (img_rect.width() / tex_size.x)
-                            .min(img_rect.height() / tex_size.y) * zoom;
+                            .min(img_rect.height() / tex_size.y)
+                            * zoom;
                         let display_size = tex_size * scale;
                         ui.painter().with_clip_rect(img_rect).image(
                             tex.id(),
@@ -1106,21 +1164,26 @@ impl CompressPhotosPage {
                                 pos2(img_rect.left() + 8.0, img_rect.bottom() - 8.0),
                                 egui::Align2::LEFT_BOTTOM,
                                 format!("Loading preview\u{2026} {pct}%"),
-                                egui::FontId::proportional(11.0), theme.colors.fg_muted,
+                                egui::FontId::proportional(11.0),
+                                theme.colors.fg_muted,
                             );
                         }
                     } else if self.preview_loading {
                         let pct = (self.preview_load_progress * 100.0) as u32;
                         ui.painter().text(
-                            img_rect.center(), egui::Align2::CENTER_CENTER,
+                            img_rect.center(),
+                            egui::Align2::CENTER_CENTER,
                             format!("Loading preview\u{2026} {pct}%"),
-                            egui::FontId::proportional(13.0), theme.colors.fg_muted,
+                            egui::FontId::proportional(13.0),
+                            theme.colors.fg_muted,
                         );
                     } else {
                         ui.painter().text(
-                            img_rect.center(), egui::Align2::CENTER_CENTER,
+                            img_rect.center(),
+                            egui::Align2::CENTER_CENTER,
                             "Preview not available",
-                            egui::FontId::proportional(13.0), theme.colors.fg_muted,
+                            egui::FontId::proportional(13.0),
+                            theme.colors.fg_muted,
                         );
                     }
                 }
@@ -1523,6 +1586,20 @@ impl CompressPhotosPage {
     }
 
     fn add_paths(&mut self, _ctx: &egui::Context, paths: Vec<PathBuf>) {
+        let had_input = !paths.is_empty();
+        let paths = runtime::collect_matching_paths(paths, |path| {
+            super::models::PhotoFormat::from_path(path).is_some()
+        });
+        if paths.is_empty() {
+            if had_input {
+                self.banner = Some(BannerMessage {
+                    tone: BannerTone::Info,
+                    text: "No supported image files were found in the dropped items.".into(),
+                });
+            }
+            return;
+        }
+
         // Only skip paths already in the queue that are still "Ready" (not yet compressed).
         // Completed / failed / cancelled items can be re-added as fresh queue entries.
         let new_paths: Vec<PathBuf> = paths

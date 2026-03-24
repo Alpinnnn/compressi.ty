@@ -18,7 +18,7 @@
 Requirements:
 
 - Rust toolchain
-- Internet access to download the bundled FFmpeg runtime
+- Internet access only when the bundled FFmpeg cache is missing or when `-RefreshEngine` is used
 - Inno Setup 6 to generate the final `.exe` installer
 
 Command:
@@ -32,12 +32,16 @@ Options:
 ```powershell
 powershell -ExecutionPolicy Bypass -File packaging\windows\build-installer.ps1 -SkipTests
 powershell -ExecutionPolicy Bypass -File packaging\windows\build-installer.ps1 -RefreshEngine
+powershell -ExecutionPolicy Bypass -File packaging\windows\build-installer.ps1 -Variant no-engine
+powershell -ExecutionPolicy Bypass -File packaging\windows\build-installer.ps1 -Variant all
 ```
 
 Result:
 
-- Always creates a staging bundle in `dist/windows/Compressity/`
-- Creates the installer in `dist/windows/installer/` when Inno Setup is available
+- `-Variant bundled` creates `dist/windows/Compressity/` and the default installer
+- `-Variant no-engine` creates `dist/windows/Compressity-no-engine/` and a `NoEngine` installer
+- `-Variant all` creates both staged bundles and both installer variants
+- When Inno Setup is available, the generated installers are written to `dist/windows/installer/`
 
 ## Linux
 
@@ -78,5 +82,7 @@ Result:
 ## Engine Bundle
 
 - The packaging scripts include a bundled FFmpeg runtime
+- The Windows build now reuses the cached FFmpeg archive in `dist/windows/engine-cache/`
 - Use `-RefreshEngine` on the Windows build to fetch the latest bundled runtime
+- The `no-engine` variant skips copying FFmpeg into the package entirely
 - After installation, engine versions can still be checked and updated from Settings

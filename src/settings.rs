@@ -6,6 +6,8 @@ use crate::runtime;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AppSettings {
     pub default_output_folder: Option<PathBuf>,
+    pub photo_output_folder: Option<PathBuf>,
+    pub video_output_folder: Option<PathBuf>,
 }
 
 impl AppSettings {
@@ -40,49 +42,137 @@ impl AppSettings {
         }
     }
 
+    pub fn preferred_photo_output_folder(&self) -> Option<PathBuf> {
+        self.photo_output_folder
+            .clone()
+            .or_else(|| self.default_output_folder.clone())
+    }
+
+    pub fn preferred_video_output_folder(&self) -> Option<PathBuf> {
+        self.video_output_folder
+            .clone()
+            .or_else(|| self.default_output_folder.clone())
+    }
+
     fn to_json(&self) -> Result<String, ()> {
-        let folder = self
-            .default_output_folder
-            .as_ref()
-            .and_then(|p| p.to_str())
-            .unwrap_or("");
-        let value = if folder.is_empty() {
-            "null".to_owned()
-        } else {
-            // Escape backslashes and quotes for a JSON string value
-            let escaped = folder.replace('\\', "\\\\").replace('"', "\\\"");
-            format!("\"{}\"", escaped)
-        };
-        Ok(format!("{{\"default_output_folder\":{value}}}"))
+        Ok(format!(
+            "{{\"default_output_folder\":{},\"photo_output_folder\":{},\"video_output_folder\":{}}}",
+            path_to_json_value(self.default_output_folder.as_ref()),
+            path_to_json_value(self.photo_output_folder.as_ref()),
+            path_to_json_value(self.video_output_folder.as_ref()),
+        ))
     }
 
     fn from_json(text: &str) -> Option<Self> {
-        // Minimal hand-rolled JSON parser — avoids pulling in serde.
+        // Minimal hand-rolled JSON parser to avoid pulling in serde.
         let text = text.trim();
-        // Extract value for "default_output_folder"
-        let key = "\"default_output_folder\"";
-        let key_pos = text.find(key)?;
-        let after_colon = text[key_pos + key.len()..].trim_start_matches([' ', ':', '\t']);
-        if after_colon.starts_with("null") {
-            return Some(Self {
-                default_output_folder: None,
-            });
+        if !text.starts_with('{') || !text.ends_with('}') {
+            return None;
         }
-        if after_colon.starts_with('"') {
-            let inner = &after_colon[1..];
-            let end = inner.find('"')?;
-            let raw = &inner[..end];
-            // Unescape basic sequences
-            let unescaped = raw.replace("\\\\", "\\").replace("\\\"", "\"");
-            if unescaped.is_empty() {
-                return Some(Self {
-                    default_output_folder: None,
-                });
-            }
-            return Some(Self {
-                default_output_folder: Some(PathBuf::from(unescaped)),
+
+        Some(Self {
+            default_output_folder: parse_optional_path_field(text, "default_output_folder").ok()?,
+            photo_output_folder: parse_optional_path_field(text, "photo_output_folder").ok()?,
+            video_output_folder: parse_optional_path_field(text, "video_output_folder").ok()?,
+        })
+    }
+}
+
+fn path_to_json_value(path: Option<&PathBuf>) -> String {
+    let value = path.and_then(|value| value.to_str()).unwrap_or("");
+    if value.is_empty() {
+        "null".to_owned()
+    } else {
+        let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+        format!("\"{escaped}\"")
+    }
+}
+
+fn parse_optional_path_field(text: &str, field: &str) -> Result<Option<PathBuf>, ()> {
+    let key = format!("\"{field}\"");
+    let Some(key_pos) = text.find(&key) else {
+        return Ok(None);
+    };
+
+    let after_key = &text[key_pos + key.len()..];
+    let Some(colon_pos) = after_key.find(':') else {
+        return Err(());
+    };
+    let after_colon = after_key[colon_pos + 1..].trim_start();
+
+    if after_colon.starts_with("null") {
+        return Ok(None);
+    }
+
+    let Some(after_quote) = after_colon.strip_prefix('"') else {
+        return Err(());
+    };
+
+    let value = parse_json_string(after_quote).ok_or(())?;
+    if value.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(PathBuf::from(value)))
+    }
+}
+
+fn parse_json_string(input: &str) -> Option<String> {
+    let mut escaped = false;
+    let mut value = String::new();
+
+    for ch in input.chars() {
+        if escaped {
+            value.push(match ch {
+                '\\' => '\\',
+                '"' => '"',
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                other => other,
             });
+            escaped = false;
+            continue;
         }
-        None
+
+        match ch {
+            '\\' => escaped = true,
+            '"' => return Some(value),
+            other => value.push(other),
+        }
+    }
+
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppSettings;
+    use std::path::PathBuf;
+
+    #[test]
+    fn parses_legacy_settings_file() {
+        let settings =
+            AppSettings::from_json(r#"{"default_output_folder":"C:\\Exports"}"#).unwrap();
+
+        assert_eq!(
+            settings.default_output_folder,
+            Some(PathBuf::from(r"C:\Exports"))
+        );
+        assert_eq!(settings.photo_output_folder, None);
+        assert_eq!(settings.video_output_folder, None);
+    }
+
+    #[test]
+    fn round_trips_all_output_folders() {
+        let settings = AppSettings {
+            default_output_folder: Some(PathBuf::from(r"C:\Exports")),
+            photo_output_folder: Some(PathBuf::from(r"D:\Photos")),
+            video_output_folder: Some(PathBuf::from(r"E:\Videos")),
+        };
+
+        let encoded = settings.to_json().unwrap();
+        let decoded = AppSettings::from_json(&encoded).unwrap();
+
+        assert_eq!(decoded, settings);
     }
 }

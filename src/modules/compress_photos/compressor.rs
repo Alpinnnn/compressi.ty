@@ -529,11 +529,9 @@ fn create_output_dir() -> Result<PathBuf, String> {
         .duration_since(UNIX_EPOCH)
         .map_err(|error| format!("Clock error: {error}"))?
         .as_secs();
-    let base = runtime::default_output_root();
+    let base = runtime::default_photo_output_root();
 
-    Ok(base
-        .join("photos")
-        .join(format!("run-{timestamp}")))
+    Ok(base.join(format!("run-{timestamp}")))
 }
 
 fn report_progress(sender: &Sender<CompressionEvent>, id: u64, progress: f32, stage: &str) {

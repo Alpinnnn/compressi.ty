@@ -124,89 +124,142 @@ fn render_output_settings(ui: &mut Ui, theme: &AppTheme, settings: &mut AppSetti
             );
             ui.add_space(16.0);
 
-            ui.label(
-                RichText::new("Default Output Folder")
-                    .size(13.0)
-                    .strong()
-                    .color(theme.colors.fg),
+            let general_auto = format!(
+                "Not set - uses {}",
+                runtime::default_output_root().display()
             );
-            ui.add_space(4.0);
-            ui.label(
-                RichText::new("Sets the default destination for all compression modules. You can still override this per session.")
-                    .size(11.0)
-                    .color(theme.colors.fg_dim),
+            render_output_folder_field(
+                ui,
+                theme,
+                "Default Output Folder",
+                "Sets the default destination for all compression modules. You can still override this per session.",
+                &mut settings.default_output_folder,
+                &general_auto,
+                "Reset to Auto",
             );
-            ui.add_space(8.0);
 
-            panel::inset(theme)
-                .inner_margin(egui::Margin::same(12))
-                .show(ui, |ui| {
-                    ui.set_min_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        let display_path = match &settings.default_output_folder {
-                            Some(dir) => dir.display().to_string(),
-                            None => format!(
-                                "Not set — uses {}",
-                                runtime::default_output_root().display()
-                            ),
-                        };
-                        ui.label(
-                            RichText::new(format!("{} {}", icons::FOLDER, display_path))
-                                .size(12.0)
-                                .color(if settings.default_output_folder.is_some() {
-                                    theme.colors.fg
-                                } else {
-                                    theme.colors.fg_muted
-                                }),
-                        );
-                    });
-                });
-            ui.add_space(8.0);
+            ui.add_space(14.0);
 
-            ui.horizontal(|ui| {
-                if ui
-                    .add(
-                        Button::new(
-                            RichText::new(format!("{} Choose Folder", icons::FOLDER))
-                                .size(12.0)
-                                .strong()
-                                .color(Color32::BLACK),
-                        )
-                        .fill(theme.colors.accent)
-                        .stroke(Stroke::NONE)
-                        .corner_radius(CornerRadius::ZERO),
+            let photo_fallback = settings
+                .default_output_folder
+                .as_ref()
+                .map(|dir| format!("Not set - uses Default Output Folder ({})", dir.display()))
+                .unwrap_or_else(|| {
+                    format!(
+                        "Not set - uses {}",
+                        runtime::default_photo_output_root().display()
                     )
-                    .clicked()
-                    && let Some(dir) = rfd::FileDialog::new().pick_folder()
-                {
-                    settings.default_output_folder = Some(dir);
-                }
+                });
+            render_output_folder_field(
+                ui,
+                theme,
+                "Photo Output Folder",
+                "Overrides the default output location for Compress Photos. Leave empty to follow Default Output Folder.",
+                &mut settings.photo_output_folder,
+                &photo_fallback,
+                "Use Default Output Folder",
+            );
 
-                if settings.default_output_folder.is_some()
-                    && ui
-                        .add(
-                            Button::new(
-                                RichText::new("Reset to Default")
-                                    .size(12.0)
-                                    .color(theme.colors.fg),
-                            )
-                            .fill(theme.colors.bg_raised)
-                            .stroke(Stroke::new(1.0, theme.colors.border))
-                            .corner_radius(CornerRadius::ZERO),
-                        )
-                        .clicked()
-                {
-                    settings.default_output_folder = None;
-                }
-            });
+            ui.add_space(14.0);
+
+            let video_fallback = settings
+                .default_output_folder
+                .as_ref()
+                .map(|dir| format!("Not set - uses Default Output Folder ({})", dir.display()))
+                .unwrap_or_else(|| {
+                    format!(
+                        "Not set - uses {}",
+                        runtime::default_video_output_root().display()
+                    )
+                });
+            render_output_folder_field(
+                ui,
+                theme,
+                "Video Output Folder",
+                "Overrides the default output location for Compress Videos. Files are saved directly into this folder.",
+                &mut settings.video_output_folder,
+                &video_fallback,
+                "Use Default Output Folder",
+            );
+
+
         });
 }
 
-fn render_engine_settings(
+fn render_output_folder_field(
     ui: &mut Ui,
     theme: &AppTheme,
-    video_engine: &mut VideoEngineController,
+    title: &str,
+    detail: &str,
+    setting: &mut Option<std::path::PathBuf>,
+    fallback_text: &str,
+    reset_label: &str,
 ) {
+    ui.label(
+        RichText::new(title)
+            .size(13.0)
+            .strong()
+            .color(theme.colors.fg),
+    );
+    ui.add_space(4.0);
+    ui.label(RichText::new(detail).size(11.0).color(theme.colors.fg_dim));
+    ui.add_space(8.0);
+
+    panel::inset(theme)
+        .inner_margin(egui::Margin::same(12))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            let display_path = setting
+                .as_ref()
+                .map(|dir| dir.display().to_string())
+                .unwrap_or_else(|| fallback_text.to_owned());
+            ui.label(
+                RichText::new(format!("{} {}", icons::FOLDER, display_path))
+                    .size(12.0)
+                    .color(if setting.is_some() {
+                        theme.colors.fg
+                    } else {
+                        theme.colors.fg_muted
+                    }),
+            );
+        });
+    ui.add_space(8.0);
+
+    ui.horizontal(|ui| {
+        if ui
+            .add(
+                Button::new(
+                    RichText::new(format!("{} Choose Folder", icons::FOLDER))
+                        .size(12.0)
+                        .strong()
+                        .color(Color32::BLACK),
+                )
+                .fill(theme.colors.accent)
+                .stroke(Stroke::NONE)
+                .corner_radius(CornerRadius::ZERO),
+            )
+            .clicked()
+            && let Some(dir) = rfd::FileDialog::new().pick_folder()
+        {
+            *setting = Some(dir);
+        }
+
+        if setting.is_some()
+            && ui
+                .add(
+                    Button::new(RichText::new(reset_label).size(12.0).color(theme.colors.fg))
+                        .fill(theme.colors.bg_raised)
+                        .stroke(Stroke::new(1.0, theme.colors.border))
+                        .corner_radius(CornerRadius::ZERO),
+                )
+                .clicked()
+        {
+            *setting = None;
+        }
+    });
+}
+
+fn render_engine_settings(ui: &mut Ui, theme: &AppTheme, video_engine: &mut VideoEngineController) {
     panel::card(theme)
         .inner_margin(egui::Margin::same(20))
         .show(ui, |ui| {
@@ -362,7 +415,7 @@ fn render_engine_activity(ui: &mut Ui, theme: &AppTheme, status: &EngineStatus) 
                 .inner_margin(egui::Margin::same(12))
                 .show(ui, |ui| {
                     ui.label(
-                        RichText::new("Inspecting bundled and managed engines…")
+                        RichText::new("Inspecting bundled and managed engines...")
                             .size(12.5)
                             .strong()
                             .color(theme.colors.fg),
@@ -373,11 +426,7 @@ fn render_engine_activity(ui: &mut Ui, theme: &AppTheme, status: &EngineStatus) 
             panel::tinted(theme, theme.colors.accent)
                 .inner_margin(egui::Margin::same(12))
                 .show(ui, |ui| {
-                    ui.label(
-                        RichText::new(stage)
-                            .size(12.0)
-                            .color(theme.colors.fg),
-                    );
+                    ui.label(RichText::new(stage).size(12.0).color(theme.colors.fg));
                     ui.add_space(6.0);
                     let bar_width = ui.available_width().max(180.0);
                     let (rect, _) =
@@ -458,6 +507,23 @@ fn render_engine_card(
                     .size(10.5)
                     .color(theme.colors.fg_dim),
                 );
+                let mut gpu_backends = Vec::new();
+                if info.encoders.h264_nvidia
+                    || info.encoders.h265_nvidia
+                    || info.encoders.av1_nvidia
+                {
+                    gpu_backends.push("NVIDIA");
+                }
+                if info.encoders.h264_amd || info.encoders.h265_amd || info.encoders.av1_amd {
+                    gpu_backends.push("AMD");
+                }
+                if !gpu_backends.is_empty() {
+                    ui.label(
+                        RichText::new(format!("Auto GPU encode: {}", gpu_backends.join(", ")))
+                            .size(10.5)
+                            .color(theme.colors.accent),
+                    );
+                }
             } else {
                 ui.label(
                     RichText::new("Not available on this machine yet.")

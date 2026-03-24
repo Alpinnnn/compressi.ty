@@ -1,4 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeSet,
+    fs,
+    path::{Path, PathBuf},
+};
 
 pub const APP_DIR_NAME: &str = "compressity";
 pub const OUTPUT_DIR_NAME: &str = "compressity-output";
@@ -37,12 +41,66 @@ pub fn default_output_root() -> PathBuf {
         .join(OUTPUT_DIR_NAME)
 }
 
+pub fn default_photo_output_root() -> PathBuf {
+    default_output_root().join("photos")
+}
+
+pub fn default_video_output_root() -> PathBuf {
+    default_output_root().join("videos")
+}
+
+pub fn collect_matching_paths<F>(paths: Vec<PathBuf>, predicate: F) -> Vec<PathBuf>
+where
+    F: Fn(&Path) -> bool,
+{
+    let mut collected = BTreeSet::new();
+    for path in paths {
+        collect_matching_paths_from_entry(&path, &predicate, &mut collected);
+    }
+    collected.into_iter().collect()
+}
+
+fn collect_matching_paths_from_entry<F>(
+    path: &Path,
+    predicate: &F,
+    collected: &mut BTreeSet<PathBuf>,
+) where
+    F: Fn(&Path) -> bool,
+{
+    if path.is_file() {
+        if predicate(path) {
+            collected.insert(path.to_path_buf());
+        }
+        return;
+    }
+
+    if !path.is_dir() {
+        return;
+    }
+
+    let Ok(entries) = fs::read_dir(path) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        collect_matching_paths_from_entry(&entry.path(), predicate, collected);
+    }
+}
+
 pub fn ffmpeg_binary_name() -> &'static str {
-    if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" }
+    if cfg!(windows) {
+        "ffmpeg.exe"
+    } else {
+        "ffmpeg"
+    }
 }
 
 pub fn ffprobe_binary_name() -> &'static str {
-    if cfg!(windows) { "ffprobe.exe" } else { "ffprobe" }
+    if cfg!(windows) {
+        "ffprobe.exe"
+    } else {
+        "ffprobe"
+    }
 }
 
 pub fn engine_binaries_exist(dir: &Path) -> bool {

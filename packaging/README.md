@@ -19,7 +19,7 @@ Files:
 
 | File | Purpose |
 |---|---|
-| `build-installer.ps1` | Orchestrates the full build: compile, stage, bundle FFmpeg, and invoke Inno Setup |
+| `build-installer.ps1` | Orchestrates the full build, supports `bundled` and `no-engine` variants, reuses the cached FFmpeg runtime, and invokes Inno Setup |
 | `compressity.iss` | Inno Setup script with `WizardStyle=modern dark`, per-page background switching, and `assets/icon/icon.bmp` as the small wizard badge |
 | `installer-bg-welcome.png` | Background artwork for the Welcome page |
 | `installer-bg-license.png` | Background artwork for the License page |
@@ -34,6 +34,7 @@ Notes:
 - The final installer requires Inno Setup 6
 - The bundle includes the application and FFmpeg
 - Installer artwork is versioned in-repo and switched at runtime via Pascal script
+- The Windows build reuses `dist/windows/engine-cache/` and only downloads FFmpeg again when `-RefreshEngine` is used
 
 ## Linux
 

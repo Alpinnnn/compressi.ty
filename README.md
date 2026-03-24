@@ -144,12 +144,18 @@ Optional flags:
 ```powershell
 powershell -ExecutionPolicy Bypass -File packaging\windows\build-installer.ps1 -SkipTests
 powershell -ExecutionPolicy Bypass -File packaging\windows\build-installer.ps1 -RefreshEngine
+powershell -ExecutionPolicy Bypass -File packaging\windows\build-installer.ps1 -Variant no-engine
+powershell -ExecutionPolicy Bypass -File packaging\windows\build-installer.ps1 -Variant all
 ```
 
 Outputs:
 
-- `dist/windows/Compressity/`
-- `dist/windows/installer/Compressity-Setup-<version>.exe` when Inno Setup is installed
+- `dist/windows/Compressity/` for the default bundled variant
+- `dist/windows/Compressity-no-engine/` for the no-engine variant
+- `dist/windows/Compressity-bundled/` as the bundled staging folder when `-Variant all` is used
+- `dist/windows/installer/Compressity-Setup-<version>.exe` for the default bundled installer
+- `dist/windows/installer/Compressity-Setup-<version>-NoEngine.exe` for the no-engine installer
+- `dist/windows/installer/Compressity-Setup-<version>-Bundled.exe` when `-Variant all` is used
 
 ### Linux
 

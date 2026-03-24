@@ -1,15 +1,21 @@
 param(
     [switch]$SkipTests,
-    [switch]$RefreshEngine
+    [switch]$RefreshEngine,
+    [ValidateSet("bundled", "no-engine", "all")]
+    [string]$Variant = "bundled"
 )
 
 $ErrorActionPreference = "Stop"
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptRoot "..\\..")).Path
-$stageDir = Join-Path $repoRoot "dist\\windows\\Compressity"
-$installerDir = Join-Path $repoRoot "dist\\windows\\installer"
-$engineCache = Join-Path $repoRoot "dist\\windows\\engine-cache"
+$windowsDistRoot = Join-Path $repoRoot "dist\\windows"
+$defaultBundledStageDir = Join-Path $windowsDistRoot "Compressity"
+$bundledVariantStageDir = Join-Path $windowsDistRoot "Compressity-bundled"
+$noEngineStageDir = Join-Path $windowsDistRoot "Compressity-no-engine"
+$installerDir = Join-Path $windowsDistRoot "installer"
+$engineCache = Join-Path $windowsDistRoot "engine-cache"
+$setupIconPath = Join-Path $repoRoot "assets\\icon\\icon.ico"
 
 function Get-AppVersion {
     $line = Select-String -Path (Join-Path $repoRoot "Cargo.toml") -Pattern '^version = "(.*)"$' | Select-Object -First 1
@@ -35,38 +41,127 @@ function Find-Iscc {
     return $null
 }
 
-function Ensure-BundledEngine {
-    if (
-        -not $RefreshEngine `
-        -and (Test-Path (Join-Path $stageDir "ffmpeg.exe")) `
-        -and (Test-Path (Join-Path $stageDir "ffprobe.exe"))
-    ) {
-        return
+function Get-RequestedVariants {
+    switch ($Variant) {
+        "all" { return @("bundled", "no-engine") }
+        default { return @($Variant) }
     }
+}
 
-    $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+function Get-VariantStageDir([string]$VariantName) {
+    switch ($VariantName) {
+        "bundled" {
+            if ($Variant -eq "all") {
+                return $bundledVariantStageDir
+            }
+
+            return $defaultBundledStageDir
+        }
+        "no-engine" {
+            return $noEngineStageDir
+        }
+        default {
+            throw "Unknown variant '$VariantName'."
+        }
+    }
+}
+
+function Get-VariantOutputBaseName([string]$VariantName, [string]$AppVersion) {
+    switch ($VariantName) {
+        "bundled" {
+            if ($Variant -eq "all") {
+                return "Compressity-Setup-$AppVersion-Bundled"
+            }
+
+            return "Compressity-Setup-$AppVersion"
+        }
+        "no-engine" {
+            return "Compressity-Setup-$AppVersion-NoEngine"
+        }
+        default {
+            throw "Unknown variant '$VariantName'."
+        }
+    }
+}
+
+function Ensure-EngineCache {
     $downloadRoot = Join-Path $engineCache "download"
     $archivePath = Join-Path $downloadRoot "ffmpeg-release-essentials.zip"
 
-    Remove-Item $downloadRoot -Recurse -Force -ErrorAction SilentlyContinue
+    if ($RefreshEngine) {
+        Remove-Item $downloadRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
     New-Item -ItemType Directory -Force -Path $downloadRoot | Out-Null
 
-    Write-Host "Downloading bundled FFmpeg for Windows..."
-    Invoke-WebRequest -Uri $url -OutFile $archivePath
-    Expand-Archive -Path $archivePath -DestinationPath $downloadRoot -Force
+    if (-not (Test-Path $archivePath)) {
+        $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+        Write-Host "Downloading bundled FFmpeg for Windows..."
+        Invoke-WebRequest -Uri $url -OutFile $archivePath
+    }
 
     $ffmpeg = Get-ChildItem -Path $downloadRoot -Filter ffmpeg.exe -Recurse | Select-Object -First 1
     $ffprobe = Get-ChildItem -Path $downloadRoot -Filter ffprobe.exe -Recurse | Select-Object -First 1
     $ffplay = Get-ChildItem -Path $downloadRoot -Filter ffplay.exe -Recurse | Select-Object -First 1
 
     if (-not $ffmpeg -or -not $ffprobe) {
-        throw "The downloaded FFmpeg archive did not contain ffmpeg.exe and ffprobe.exe."
+        Write-Host "Extracting cached FFmpeg runtime..."
+        Expand-Archive -Path $archivePath -DestinationPath $downloadRoot -Force
+
+        $ffmpeg = Get-ChildItem -Path $downloadRoot -Filter ffmpeg.exe -Recurse | Select-Object -First 1
+        $ffprobe = Get-ChildItem -Path $downloadRoot -Filter ffprobe.exe -Recurse | Select-Object -First 1
+        $ffplay = Get-ChildItem -Path $downloadRoot -Filter ffplay.exe -Recurse | Select-Object -First 1
     }
 
-    Copy-Item $ffmpeg.FullName (Join-Path $stageDir "ffmpeg.exe") -Force
-    Copy-Item $ffprobe.FullName (Join-Path $stageDir "ffprobe.exe") -Force
-    if ($ffplay) {
-        Copy-Item $ffplay.FullName (Join-Path $stageDir "ffplay.exe") -Force
+    if (-not $ffmpeg -or -not $ffprobe) {
+        throw "The cached FFmpeg archive did not contain ffmpeg.exe and ffprobe.exe."
+    }
+
+    return @{
+        Ffmpeg = $ffmpeg.FullName
+        Ffprobe = $ffprobe.FullName
+        Ffplay = if ($ffplay) { $ffplay.FullName } else { $null }
+    }
+}
+
+function Stage-AppBundle([string]$StageDir) {
+    Remove-Item $StageDir -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
+
+    Copy-Item "target\\release\\compressity.exe" (Join-Path $StageDir "compressity.exe") -Force
+    if (Test-Path "target\\release\\compressity.pdb") {
+        Copy-Item "target\\release\\compressity.pdb" (Join-Path $StageDir "compressity.pdb") -Force
+    }
+    Copy-Item "LICENSE" (Join-Path $StageDir "LICENSE.txt") -Force
+}
+
+function Sync-SetupIconFromExe([string]$ExePath) {
+    Add-Type -AssemblyName System.Drawing
+
+    $resolvedExe = (Resolve-Path $ExePath).Path
+    $iconDir = Split-Path -Parent $setupIconPath
+    New-Item -ItemType Directory -Force -Path $iconDir | Out-Null
+
+    $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($resolvedExe)
+    if (-not $icon) {
+        throw "Could not extract the app icon from $resolvedExe."
+    }
+
+    $stream = [System.IO.File]::Open($setupIconPath, [System.IO.FileMode]::Create)
+    try {
+        $icon.Save($stream)
+    }
+    finally {
+        $stream.Dispose()
+        $icon.Dispose()
+    }
+}
+
+function Copy-BundledEngine([string]$StageDir, $EngineArtifacts) {
+    Copy-Item $EngineArtifacts.Ffmpeg (Join-Path $StageDir "ffmpeg.exe") -Force
+    Copy-Item $EngineArtifacts.Ffprobe (Join-Path $StageDir "ffprobe.exe") -Force
+    if ($EngineArtifacts.Ffplay) {
+        Copy-Item $EngineArtifacts.Ffplay (Join-Path $StageDir "ffplay.exe") -Force
     }
 }
 
@@ -77,30 +172,52 @@ if (-not $SkipTests) {
 }
 
 cargo build --release
+Sync-SetupIconFromExe "target\\release\\compressity.exe"
 
 $version = Get-AppVersion
+$requestedVariants = Get-RequestedVariants
+$iscc = Find-Iscc
+$createdOutputs = New-Object System.Collections.Generic.List[string]
+$engineArtifacts = $null
 
-Remove-Item $stageDir -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
 New-Item -ItemType Directory -Force -Path $installerDir | Out-Null
 
-Copy-Item "target\\release\\compressity.exe" (Join-Path $stageDir "compressity.exe") -Force
-if (Test-Path "target\\release\\compressity.pdb") {
-    Copy-Item "target\\release\\compressity.pdb" (Join-Path $stageDir "compressity.pdb") -Force
+if ($requestedVariants -contains "bundled") {
+    $engineArtifacts = Ensure-EngineCache
 }
-Copy-Item "LICENSE" (Join-Path $stageDir "LICENSE.txt") -Force
 
-Ensure-BundledEngine
+foreach ($variantName in $requestedVariants) {
+    $stageDir = Get-VariantStageDir $variantName
+    $outputBaseName = Get-VariantOutputBaseName $variantName $version
 
-$iscc = Find-Iscc
-if ($iscc) {
-    & $iscc `
-        "/DMyAppVersion=$version" `
-        "/DStageDir=$stageDir" `
-        (Join-Path $scriptRoot "compressity.iss")
-    Write-Host "Windows installer created in $installerDir"
-} else {
-    Write-Warning "Inno Setup 6 was not found. The bundled app is staged at $stageDir."
+    Write-Host "Building Windows package variant '$variantName'..."
+    Stage-AppBundle $stageDir
+
+    if ($variantName -eq "bundled") {
+        Copy-BundledEngine $stageDir $engineArtifacts
+    } else {
+        Write-Host "Skipping bundled FFmpeg for variant '$variantName'."
+    }
+
+    if ($iscc) {
+        & $iscc `
+            "/DMyAppVersion=$version" `
+            "/DStageDir=$stageDir" `
+            "/F$outputBaseName" `
+            (Join-Path $scriptRoot "compressity.iss")
+
+        $createdOutputs.Add((Join-Path $installerDir ($outputBaseName + ".exe")))
+    } else {
+        Write-Warning "Inno Setup 6 was not found. The staged app is available at $stageDir."
+        $createdOutputs.Add($stageDir)
+    }
+}
+
+if ($createdOutputs.Count -gt 0) {
+    Write-Host "Created outputs:"
+    foreach ($output in $createdOutputs) {
+        Write-Host " - $output"
+    }
 }
 
 Pop-Location

@@ -11,7 +11,9 @@ use eframe::egui;
 use ffmpeg_sidecar::download::{self, FfmpegDownloadProgressEvent};
 
 use crate::{
-    modules::compress_videos::models::{EncoderAvailability, EngineInfo, EngineSource, EngineStatus},
+    modules::compress_videos::models::{
+        EncoderAvailability, EngineInfo, EngineSource, EngineStatus,
+    },
     runtime,
 };
 
@@ -76,12 +78,11 @@ impl VideoEngineController {
                         if let Some(active) = inventory.active {
                             self.status = EngineStatus::Ready(active);
                         } else {
-                            self.status = EngineStatus::Failed(
-                                inventory.error.unwrap_or_else(|| {
+                            self.status =
+                                EngineStatus::Failed(inventory.error.unwrap_or_else(|| {
                                     "No bundled or managed FFmpeg engine is available yet."
                                         .to_owned()
-                                }),
-                            );
+                                }));
                         }
 
                         finished = true;
@@ -200,9 +201,9 @@ fn ensure_ready_inventory(sender: &mpsc::Sender<WorkerEvent>) -> EngineInventory
     let update_error = install_latest_managed_engine(sender).err();
     let mut refreshed = scan_inventory();
     if refreshed.active.is_none() {
-        refreshed.error = update_error.or(refreshed.error).or_else(|| {
-            Some("FFmpeg could not be installed automatically.".to_owned())
-        });
+        refreshed.error = update_error
+            .or(refreshed.error)
+            .or_else(|| Some("FFmpeg could not be installed automatically.".to_owned()));
     } else {
         refreshed.error = update_error;
     }
@@ -220,7 +221,9 @@ fn use_bundled_inventory() -> EngineInventory {
     let mut remove_error = None;
 
     if let Some(managed_dir) = runtime::managed_engine_dir() {
-        if managed_dir.exists() && let Err(error) = fs::remove_dir_all(&managed_dir) {
+        if managed_dir.exists()
+            && let Err(error) = fs::remove_dir_all(&managed_dir)
+        {
             remove_error = Some(format!(
                 "Could not remove managed engine from {}: {error}",
                 managed_dir.display()
@@ -260,11 +263,13 @@ fn scan_inventory() -> EngineInventory {
             .flatten()
     });
 
-    let system = discover_system_engine().map_err(|error| {
-        if first_error.is_none() {
-            first_error = Some(error);
-        }
-    }).ok();
+    let system = discover_system_engine()
+        .map_err(|error| {
+            if first_error.is_none() {
+                first_error = Some(error);
+            }
+        })
+        .ok();
 
     let active = managed
         .clone()
@@ -304,10 +309,8 @@ fn install_latest_managed_engine(sender: &mpsc::Sender<WorkerEvent>) -> Result<(
         .map_err(|error| format!("Could not resolve the FFmpeg download URL: {error}"))?;
 
     let progress_sender = sender.clone();
-    let archive_path = download::download_ffmpeg_package_with_progress(
-        download_url,
-        &destination,
-        move |event| {
+    let archive_path =
+        download::download_ffmpeg_package_with_progress(download_url, &destination, move |event| {
             let (progress, stage) = match event {
                 FfmpegDownloadProgressEvent::Starting => {
                     (0.05, "Preparing engine update".to_owned())
@@ -332,9 +335,8 @@ fn install_latest_managed_engine(sender: &mpsc::Sender<WorkerEvent>) -> Result<(
                 FfmpegDownloadProgressEvent::Done => (1.0, "Engine update ready".to_owned()),
             };
             let _ = progress_sender.send(WorkerEvent::Progress { progress, stage });
-        },
-    )
-    .map_err(|error| format!("Could not download the latest FFmpeg package: {error}"))?;
+        })
+        .map_err(|error| format!("Could not download the latest FFmpeg package: {error}"))?;
 
     let _ = sender.send(WorkerEvent::Progress {
         progress: 0.94,
@@ -390,6 +392,24 @@ fn inspect_engine(
     let encoders_output = run_capture(encoders_command)
         .map_err(|error| format!("Could not inspect FFmpeg encoders: {error}"))?;
 
+    let h264_software = encoders_output.contains(" libx264 ");
+    let h265_software = encoders_output.contains(" libx265 ");
+    let av1_software = encoders_output.contains(" libsvtav1 ");
+
+    let h264_nvidia = encoder_list_contains(&encoders_output, "h264_nvenc")
+        && probe_hardware_encoder(&ffmpeg_path, "h264_nvenc");
+    let h265_nvidia = encoder_list_contains(&encoders_output, "hevc_nvenc")
+        && probe_hardware_encoder(&ffmpeg_path, "hevc_nvenc");
+    let av1_nvidia = encoder_list_contains(&encoders_output, "av1_nvenc")
+        && probe_hardware_encoder(&ffmpeg_path, "av1_nvenc");
+
+    let h264_amd = encoder_list_contains(&encoders_output, "h264_amf")
+        && probe_hardware_encoder(&ffmpeg_path, "h264_amf");
+    let h265_amd = encoder_list_contains(&encoders_output, "hevc_amf")
+        && probe_hardware_encoder(&ffmpeg_path, "hevc_amf");
+    let av1_amd = encoder_list_contains(&encoders_output, "av1_amf")
+        && probe_hardware_encoder(&ffmpeg_path, "av1_amf");
+
     Ok(EngineInfo {
         version: version_output
             .lines()
@@ -400,12 +420,48 @@ fn inspect_engine(
         ffmpeg_path,
         ffprobe_path,
         encoders: EncoderAvailability {
-            h264: encoders_output.contains(" libx264 "),
-            h265: encoders_output.contains(" libx265 "),
-            av1: encoders_output.contains(" libsvtav1 "),
+            h264: h264_software || h264_nvidia || h264_amd,
+            h265: h265_software || h265_nvidia || h265_amd,
+            av1: av1_software || av1_nvidia || av1_amd,
+            h264_nvidia,
+            h265_nvidia,
+            av1_nvidia,
+            h264_amd,
+            h265_amd,
+            av1_amd,
         },
         source,
     })
+}
+
+fn encoder_list_contains(encoders_output: &str, encoder_name: &str) -> bool {
+    encoders_output
+        .lines()
+        .any(|line| line.split_whitespace().any(|token| token == encoder_name))
+}
+
+fn probe_hardware_encoder(ffmpeg_path: &Path, encoder_name: &str) -> bool {
+    let mut command = background_command(ffmpeg_path);
+    command
+        .arg("-hide_banner")
+        .arg("-y")
+        .arg("-f")
+        .arg("lavfi")
+        .arg("-i")
+        .arg("color=c=black:s=64x64:d=0.1")
+        .arg("-frames:v")
+        .arg("1")
+        .arg("-an")
+        .arg("-c:v")
+        .arg(encoder_name)
+        .arg("-f")
+        .arg("null")
+        .arg("-");
+
+    command
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 
 fn background_command(program: &Path) -> Command {
@@ -429,7 +485,10 @@ fn run_capture(mut command: Command) -> Result<String, String> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let detail = stderr.lines().last().unwrap_or("Process exited unexpectedly.");
+        let detail = stderr
+            .lines()
+            .last()
+            .unwrap_or("Process exited unexpectedly.");
         return Err(detail.to_owned());
     }
 

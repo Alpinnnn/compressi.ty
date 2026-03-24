@@ -1,8 +1,12 @@
-#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
 mod app;
 mod branding;
 mod icons;
+mod launch;
 mod modules;
 mod runtime;
 mod settings;
@@ -12,6 +16,8 @@ mod ui;
 use eframe::egui;
 
 fn main() -> eframe::Result<()> {
+    let launch_import = launch::LaunchImport::collect_from_command_line();
+
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Compressi.ty")
         .with_maximized(true)
@@ -30,6 +36,6 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Compressi.ty",
         options,
-        Box::new(|cc| Ok(Box::new(app::CompressityApp::new(cc)))),
+        Box::new(move |cc| Ok(Box::new(app::CompressityApp::new(cc, launch_import)))),
     )
 }
