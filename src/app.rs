@@ -11,6 +11,7 @@ use crate::{
         compress_videos::{CompressVideosPage, engine::VideoEngineController},
     },
     settings::AppSettings,
+    single_instance::{ExternalLaunchReceiver, PrimaryInstance},
     theme::AppTheme,
     ui,
 };
@@ -27,12 +28,17 @@ pub struct CompressityApp {
     app_settings: AppSettings,
     video_engine: VideoEngineController,
     pending_launch_import: LaunchImport,
+    external_launches: Option<ExternalLaunchReceiver>,
     /// Snapshot of settings from previous frame to detect changes and save.
     prev_settings_snapshot: Option<AppSettings>,
 }
 
 impl CompressityApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, pending_launch_import: LaunchImport) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        pending_launch_import: LaunchImport,
+        primary_instance: Option<PrimaryInstance>,
+    ) -> Self {
         let theme = AppTheme::default();
         theme.apply(&cc.egui_ctx);
         cc.egui_ctx
@@ -42,6 +48,7 @@ impl CompressityApp {
         let mut video_engine = VideoEngineController::default();
         video_engine.refresh();
         let active_module = pending_launch_import.preferred_module();
+        let external_launches = primary_instance.map(|instance| instance.start(&cc.egui_ctx));
 
         Self {
             active_module,
@@ -54,8 +61,25 @@ impl CompressityApp {
             app_icon: branding::load_app_icon_texture(&cc.egui_ctx),
             video_engine,
             pending_launch_import,
+            external_launches,
             prev_settings_snapshot: Some(app_settings.clone()),
             app_settings,
+        }
+    }
+
+    fn poll_external_launches(&mut self, ctx: &egui::Context) {
+        let Some(external_launches) = &mut self.external_launches else {
+            return;
+        };
+
+        while let Some(launch_import) = external_launches.try_recv() {
+            if let Some(module) = launch_import.preferred_module() {
+                self.active_module = Some(module);
+            }
+
+            self.pending_launch_import.merge(launch_import);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
     }
 
@@ -182,6 +206,7 @@ impl CompressityApp {
 
 impl eframe::App for CompressityApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_external_launches(ctx);
         self.video_engine.poll(ctx);
         self.apply_pending_launch_import(ctx);
         self.compress_photos.poll_background(ctx);

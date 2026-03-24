@@ -441,6 +441,19 @@ fn encoder_list_contains(encoders_output: &str, encoder_name: &str) -> bool {
 }
 
 fn probe_hardware_encoder(ffmpeg_path: &Path, encoder_name: &str) -> bool {
+    // Strategy 1: Null output (fastest)
+    if probe_hw_null(ffmpeg_path, encoder_name) {
+        return true;
+    }
+
+    // Strategy 2: Encode a single frame to a temp file (more compatible)
+    probe_hw_tempfile(ffmpeg_path, encoder_name)
+}
+
+/// Attempts the probe using the null muxer (`-f null`).
+fn probe_hw_null(ffmpeg_path: &Path, encoder_name: &str) -> bool {
+    let null_device = if cfg!(windows) { "NUL" } else { "/dev/null" };
+
     let mut command = background_command(ffmpeg_path);
     command
         .arg("-hide_banner")
@@ -454,15 +467,54 @@ fn probe_hardware_encoder(ffmpeg_path: &Path, encoder_name: &str) -> bool {
         .arg("-an")
         .arg("-c:v")
         .arg(encoder_name)
+        .arg("-pix_fmt")
+        .arg("yuv420p")
         .arg("-f")
         .arg("null")
-        .arg("-");
+        .arg(null_device);
 
     command
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
 }
+
+/// Falls back to encoding a single frame into a real .mp4 temp file.
+/// Some FFmpeg builds or driver versions reject `-f null` with hardware encoders.
+fn probe_hw_tempfile(ffmpeg_path: &Path, encoder_name: &str) -> bool {
+    let temp_dir = std::env::temp_dir().join("compressity").join("gpu-probe");
+    if fs::create_dir_all(&temp_dir).is_err() {
+        return false;
+    }
+
+    let temp_file = temp_dir.join(format!("{encoder_name}_probe.mp4"));
+
+    let mut command = background_command(ffmpeg_path);
+    command
+        .arg("-hide_banner")
+        .arg("-y")
+        .arg("-f")
+        .arg("lavfi")
+        .arg("-i")
+        .arg("color=c=black:s=64x64:d=0.1")
+        .arg("-frames:v")
+        .arg("1")
+        .arg("-an")
+        .arg("-c:v")
+        .arg(encoder_name)
+        .arg("-pix_fmt")
+        .arg("yuv420p")
+        .arg(&temp_file);
+
+    let result = command
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+
+    let _ = fs::remove_file(&temp_file);
+    result
+}
+
 
 fn background_command(program: &Path) -> Command {
     let mut command = Command::new(program);

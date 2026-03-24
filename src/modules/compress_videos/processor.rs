@@ -62,6 +62,8 @@ struct EncodePlan {
     video_bitrate_kbps: u32,
     audio_bitrate_kbps: Option<u32>,
     crf: Option<u8>,
+    /// CQ value for hardware encoder quality-based VBR (NVENC `-cq:v`).
+    hardware_cq: Option<u8>,
     preset: Option<String>,
     output_width: u32,
     output_height: u32,
@@ -803,6 +805,7 @@ fn build_plan(
                 video_bitrate_kbps,
                 audio_bitrate_kbps,
                 crf: None,
+                hardware_cq: None,
                 preset: encoder_preset(encoder, preview_mode, true),
                 output_width,
                 output_height,
@@ -829,6 +832,11 @@ fn build_plan(
                 } else {
                     Some(crf)
                 },
+                hardware_cq: if encoder.is_hardware() {
+                    Some(hardware_cq(settings.quality, codec))
+                } else {
+                    None
+                },
                 preset: encoder_preset(encoder, preview_mode, false),
                 output_width,
                 output_height,
@@ -848,6 +856,7 @@ fn build_plan(
                 video_bitrate_kbps: settings.custom_bitrate_kbps.clamp(350, 80_000),
                 audio_bitrate_kbps,
                 crf: None,
+                hardware_cq: None,
                 preset: encoder_preset(encoder, preview_mode, false),
                 output_width,
                 output_height,
@@ -879,6 +888,11 @@ fn build_encode_command(
         .arg("-stats_period")
         .arg("0.25");
 
+    // Enable auto hardware acceleration for decoding when using a GPU encoder.
+    if plan.encoder.is_hardware() {
+        command.arg("-hwaccel").arg("auto");
+    }
+
     if start_secs > 0.0 {
         command.arg("-ss").arg(format_time_arg(start_secs));
     }
@@ -896,8 +910,17 @@ fn build_encode_command(
 
     command.arg("-sn").arg("-dn");
 
+    // For hardware encoders, include pixel format conversion in the filter
+    // chain so that NVENC/AMF receives frames in a format it can handle.
     let filter = build_filter_chain(video, plan);
-    if !filter.is_empty() {
+    if plan.encoder.is_hardware() {
+        let pix_filter = "format=yuv420p";
+        if filter.is_empty() {
+            command.arg("-vf").arg(pix_filter);
+        } else {
+            command.arg("-vf").arg(format!("{filter},{pix_filter}"));
+        }
+    } else if !filter.is_empty() {
         command.arg("-vf").arg(filter);
     }
 
@@ -905,7 +928,11 @@ fn build_encode_command(
     if let Some(preset) = &plan.preset {
         command.arg("-preset").arg(preset);
     }
-    command.arg("-pix_fmt").arg("yuv420p");
+    // Software encoders use -pix_fmt directly; hardware encoders convert
+    // through the video filter above.
+    if !plan.encoder.is_hardware() {
+        command.arg("-pix_fmt").arg("yuv420p");
+    }
     command.arg("-movflags").arg("+faststart");
     command.arg("-g").arg("240");
 
@@ -914,13 +941,26 @@ fn build_encode_command(
             command.arg("-crf").arg(crf.to_string());
         }
         None => {
-            command
-                .arg("-b:v")
-                .arg(format!("{}k", plan.video_bitrate_kbps))
-                .arg("-maxrate")
-                .arg(format!("{}k", plan.video_bitrate_kbps))
-                .arg("-bufsize")
-                .arg(format!("{}k", plan.video_bitrate_kbps.saturating_mul(2)));
+            if plan.encoder.is_hardware() && plan.hardware_cq.is_some() {
+                // NVENC/AMF quality-based VBR: use -rc:v vbr with -cq:v.
+                command
+                    .arg("-rc:v")
+                    .arg("vbr")
+                    .arg("-cq:v")
+                    .arg(plan.hardware_cq.unwrap().to_string())
+                    .arg("-b:v")
+                    .arg(format!("{}k", plan.video_bitrate_kbps))
+                    .arg("-maxrate")
+                    .arg(format!("{}k", plan.video_bitrate_kbps.saturating_mul(2)));
+            } else {
+                command
+                    .arg("-b:v")
+                    .arg(format!("{}k", plan.video_bitrate_kbps))
+                    .arg("-maxrate")
+                    .arg(format!("{}k", plan.video_bitrate_kbps))
+                    .arg("-bufsize")
+                    .arg(format!("{}k", plan.video_bitrate_kbps.saturating_mul(2)));
+            }
         }
     }
 
@@ -1157,6 +1197,18 @@ fn quality_to_crf(quality: u8, codec: CodecChoice) -> u8 {
     }
 }
 
+/// Converts the quality slider (0..100) into an NVENC/AMF constant-quality
+/// value. The CQ scale goes from 0 (best quality, largest file) to 51 (worst).
+fn hardware_cq(quality: u8, codec: CodecChoice) -> u8 {
+    let quality = quality as f32 / 100.0;
+    let cq = match codec {
+        CodecChoice::H264 => 32.0 - quality * 14.0,
+        CodecChoice::H265 => 34.0 - quality * 14.0,
+        CodecChoice::Av1 => 38.0 - quality * 16.0,
+    };
+    cq.round().clamp(0.0, 51.0) as u8
+}
+
 fn quality_estimated_bitrate(
     video: &VideoMetadata,
     settings: &VideoSettings,
@@ -1245,7 +1297,31 @@ fn encoder_preset(
     aggressive: bool,
 ) -> Option<String> {
     if encoder.is_hardware() {
-        return None;
+        // NVENC uses p1 (fastest) through p7 (best quality).
+        // AMF uses speed / balanced / quality.
+        return match encoder.backend {
+            EncoderBackend::Nvidia => Some(
+                if preview_mode {
+                    "p1"
+                } else if aggressive {
+                    "p5"
+                } else {
+                    "p4"
+                }
+                .to_owned(),
+            ),
+            EncoderBackend::Amd => Some(
+                if preview_mode {
+                    "speed"
+                } else if aggressive {
+                    "quality"
+                } else {
+                    "balanced"
+                }
+                .to_owned(),
+            ),
+            EncoderBackend::Software => None,
+        };
     }
 
     Some(match encoder.codec {

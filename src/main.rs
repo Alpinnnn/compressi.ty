@@ -10,6 +10,7 @@ mod launch;
 mod modules;
 mod runtime;
 mod settings;
+mod single_instance;
 mod theme;
 mod ui;
 
@@ -17,6 +18,14 @@ use eframe::egui;
 
 fn main() -> eframe::Result<()> {
     let launch_import = launch::LaunchImport::collect_from_command_line();
+    let primary_instance = match single_instance::initialize(&launch_import) {
+        Ok(single_instance::InstanceState::Primary(primary_instance)) => Some(primary_instance),
+        Ok(single_instance::InstanceState::SecondaryForwarded) => return Ok(()),
+        Err(error) => {
+            eprintln!("single-instance handoff unavailable: {error}");
+            None
+        }
+    };
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Compressi.ty")
@@ -36,6 +45,12 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Compressi.ty",
         options,
-        Box::new(move |cc| Ok(Box::new(app::CompressityApp::new(cc, launch_import)))),
+        Box::new(move |cc| {
+            Ok(Box::new(app::CompressityApp::new(
+                cc,
+                launch_import,
+                primary_instance,
+            )))
+        }),
     )
 }

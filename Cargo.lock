@@ -834,6 +834,7 @@ dependencies = [
  "resvg",
  "rfd",
  "webp",
+ "windows-sys 0.59.0",
  "winresource",
 ]
 

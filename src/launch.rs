@@ -7,6 +7,8 @@ use crate::modules::{
     ModuleKind, compress_photos::models::PhotoFormat, compress_videos::processor,
 };
 
+const IPC_MAGIC: &str = "COMPRESSITY_LAUNCH_V1";
+
 /// Supported files passed to the app during startup.
 #[derive(Debug, Default)]
 pub struct LaunchImport {
@@ -18,9 +20,17 @@ pub struct LaunchImport {
 impl LaunchImport {
     /// Reads command-line file paths and groups them by the workspace that can handle them.
     pub fn collect_from_command_line() -> Self {
+        Self::collect_from_paths(std::env::args_os().skip(1).map(PathBuf::from))
+    }
+
+    /// Groups a set of paths by the workspace that can handle them.
+    pub fn collect_from_paths<I>(paths: I) -> Self
+    where
+        I: IntoIterator<Item = PathBuf>,
+    {
         let mut launch_import = Self::default();
 
-        for path in std::env::args_os().skip(1).map(PathBuf::from) {
+        for path in paths {
             if !path.is_file() {
                 continue;
             }
@@ -41,6 +51,15 @@ impl LaunchImport {
         }
 
         launch_import
+    }
+
+    /// Merges a new launch request into the pending import queue.
+    pub fn merge(&mut self, mut other: Self) {
+        if let Some(module) = other.preferred_module {
+            self.preferred_module = Some(module);
+        }
+        self.photo_paths.append(&mut other.photo_paths);
+        self.video_paths.append(&mut other.video_paths);
     }
 
     /// Returns the workspace that best matches the first supported startup file.
@@ -67,6 +86,69 @@ impl LaunchImport {
     pub fn take_video_paths(&mut self) -> Vec<PathBuf> {
         mem::take(&mut self.video_paths)
     }
+
+    /// Serializes the launch request for inter-process handoff.
+    pub fn to_ipc_payload(&self) -> String {
+        let mut payload = String::from(IPC_MAGIC);
+
+        if let Some(module_name) = self.preferred_module.and_then(module_to_ipc_name) {
+            payload.push('\n');
+            payload.push_str("M\t");
+            payload.push_str(module_name);
+        }
+
+        for path in &self.photo_paths {
+            payload.push('\n');
+            payload.push_str("P\t");
+            payload.push_str(&path.to_string_lossy());
+        }
+
+        for path in &self.video_paths {
+            payload.push('\n');
+            payload.push_str("V\t");
+            payload.push_str(&path.to_string_lossy());
+        }
+
+        payload
+    }
+
+    /// Parses a launch request received from another app instance.
+    pub fn from_ipc_payload(payload: &str) -> Option<Self> {
+        let mut lines = payload.lines();
+        if lines.next()? != IPC_MAGIC {
+            return None;
+        }
+
+        let mut launch_import = Self::default();
+        for line in lines {
+            let Some((kind, value)) = line.split_once('\t') else {
+                continue;
+            };
+
+            match kind {
+                "M" => {
+                    if launch_import.preferred_module.is_none() {
+                        launch_import.preferred_module = module_from_ipc_name(value);
+                    }
+                }
+                "P" => launch_import.photo_paths.push(PathBuf::from(value)),
+                "V" => launch_import.video_paths.push(PathBuf::from(value)),
+                _ => {}
+            }
+        }
+
+        if launch_import.preferred_module.is_none() {
+            launch_import.preferred_module = if !launch_import.photo_paths.is_empty() {
+                Some(ModuleKind::CompressPhotos)
+            } else if !launch_import.video_paths.is_empty() {
+                Some(ModuleKind::CompressVideos)
+            } else {
+                None
+            };
+        }
+
+        Some(launch_import)
+    }
 }
 
 fn supported_module_for_path(path: &Path) -> Option<ModuleKind> {
@@ -79,4 +161,20 @@ fn supported_module_for_path(path: &Path) -> Option<ModuleKind> {
     }
 
     None
+}
+
+fn module_to_ipc_name(module: ModuleKind) -> Option<&'static str> {
+    match module {
+        ModuleKind::CompressPhotos => Some("photos"),
+        ModuleKind::CompressVideos => Some("videos"),
+        _ => None,
+    }
+}
+
+fn module_from_ipc_name(value: &str) -> Option<ModuleKind> {
+    match value {
+        "photos" => Some(ModuleKind::CompressPhotos),
+        "videos" => Some(ModuleKind::CompressVideos),
+        _ => None,
+    }
 }

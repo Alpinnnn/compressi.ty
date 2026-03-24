@@ -1,8 +1,9 @@
 use std::{collections::HashMap, path::PathBuf, sync::mpsc, thread, time::Duration};
 
 use eframe::egui::{
-    self, Align, Button, Color32, ColorImage, CornerRadius, DragValue, Id, Layout, Rect, RichText,
-    ScrollArea, Sense, Slider, Stroke, StrokeKind, TextureHandle, TextureOptions, Ui, pos2, vec2,
+    self, Align, Button, Color32, ColorImage, CornerRadius, DragValue, Grid, Id, Layout, Rect,
+    RichText, ScrollArea, Sense, Slider, Stroke, StrokeKind, TextureHandle, TextureOptions, Ui,
+    pos2, vec2,
 };
 
 use crate::{
@@ -12,7 +13,7 @@ use crate::{
         compress_videos::{
             engine::VideoEngineController,
             models::{
-                CodecChoice, CompressionMode, EncoderAvailability, EngineStatus,
+                CodecChoice, CompressionMode, EncoderAvailability, EncoderBackend, EngineStatus,
                 ProcessingProgress, ResolutionChoice, VideoCompressionState, VideoMetadata,
                 VideoQueueItem, VideoSettings, VideoThumbnail,
             },
@@ -103,10 +104,10 @@ fn truncate_filename(name: &str, max_chars: usize) -> String {
         let ext = &name[dot_pos..];
         let stem_budget = max_chars.saturating_sub(ext.len()).saturating_sub(1);
         if stem_budget >= 4 {
-            return format!("{}â€¦{}", &name[..stem_budget], ext);
+            return format!("{}...{}", &name[..stem_budget], ext);
         }
     }
-    format!("{}â€¦", &name[..max_chars.saturating_sub(1)])
+    format!("{}...", &name[..max_chars.saturating_sub(1)])
 }
 
 // â”€â”€â”€ Public API + Polling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -240,7 +241,7 @@ impl CompressVideosPage {
                     .count();
                 self.banner = Some(BannerMessage {
                     tone: BannerTone::Success,
-                    text: format!("Done â€” {n} video(s) compressed."),
+                    text: format!("Done - {n} video(s) compressed."),
                 });
             }
             self.active_batch = None;
@@ -633,7 +634,7 @@ impl CompressVideosPage {
         match engine.status().clone() {
             EngineStatus::Checking => {
                 panel::tinted(theme, theme.colors.accent).show(ui, |ui| {
-                    ui.label(RichText::new("Preparing video toolsâ€¦").size(13.0).strong().color(theme.colors.fg));
+                    ui.label(RichText::new("Preparing video tools...").size(13.0).strong().color(theme.colors.fg));
                     ui.label(RichText::new("The bundled engine is being detected or a managed update is being prepared.").size(11.5).color(theme.colors.fg_dim));
                 });
             }
@@ -755,7 +756,7 @@ impl CompressVideosPage {
                             if !ready {
                                 ui.add_space(4.0);
                                 ui.label(
-                                    RichText::new("Video tools are being preparedâ€¦")
+                                    RichText::new("Video tools are being prepared...")
                                         .size(11.0)
                                         .color(theme.colors.fg_dim),
                                 );
@@ -765,7 +766,7 @@ impl CompressVideosPage {
                                 ui.add_space(6.0);
                                 ui.label(
                                     RichText::new(format!(
-                                        "Probing {} video(s)â€¦",
+                                        "Probing {} video(s)...",
                                         self.pending_probes.len()
                                     ))
                                     .size(11.0)
@@ -968,9 +969,9 @@ impl CompressVideosPage {
                 .map(|info| info.encoders.clone())
                 .unwrap_or_default();
 
-            ui.label(RichText::new(format!("Settings â€” {}", truncate_filename(&item.file_name, 24))).size(14.0).strong().color(theme.colors.fg));
+            ui.label(RichText::new(format!("Settings - {}", truncate_filename(&item.file_name, 24))).size(14.0).strong().color(theme.colors.fg));
             ui.add_space(4.0);
-            ui.label(RichText::new(format!("{} | {} | {}Ã—{}", format_bytes(metadata.size_bytes), format_duration(metadata.duration_secs), metadata.width, metadata.height))
+            ui.label(RichText::new(format!("{} | {} | {}x{}", format_bytes(metadata.size_bytes), format_duration(metadata.duration_secs), metadata.width, metadata.height))
                 .size(11.0).color(theme.colors.fg_dim));
             ui.add_space(8.0);
 
@@ -982,6 +983,32 @@ impl CompressVideosPage {
                     if mode_card(ui, theme, mode, settings.mode == mode).clicked() {
                         settings.mode = mode;
                     }
+                }
+                ui.add_space(6.0);
+
+                // GPU / CPU encoder status badge (visible for every mode)
+                {
+                    let active_codec = match settings.mode {
+                        CompressionMode::ReduceSize => encoders.reduce_size_codec(),
+                        CompressionMode::GoodQuality => encoders.quality_codec(),
+                        CompressionMode::CustomAdvanced => settings.custom_codec,
+                    };
+                    let resolved = encoders.resolved_encoder(active_codec);
+                    let (badge_text, badge_color) = match resolved.backend {
+                        EncoderBackend::Nvidia => (
+                            format!("\u{26A1} GPU: NVIDIA ({})", resolved.ffmpeg_name()),
+                            theme.colors.accent,
+                        ),
+                        EncoderBackend::Amd => (
+                            format!("\u{26A1} GPU: AMD ({})", resolved.ffmpeg_name()),
+                            theme.colors.accent,
+                        ),
+                        EncoderBackend::Software => (
+                            format!("\u{1F5A5} CPU Encoding ({})", resolved.ffmpeg_name()),
+                            theme.colors.fg_muted,
+                        ),
+                    };
+                    ui.label(RichText::new(badge_text).size(11.0).strong().color(badge_color));
                 }
                 ui.add_space(8.0);
 
@@ -1025,23 +1052,50 @@ impl CompressVideosPage {
                         ui.add_space(8.0);
 
                         ui.label(RichText::new("Codec").size(12.0).color(theme.colors.fg_dim));
-                        ui.horizontal_wrapped(|ui| {
-                            for codec in CodecChoice::ALL {
-                                let enabled = encoders.supports(codec);
-                                if advanced_codec_button(
-                                    ui,
-                                    theme,
-                                    codec,
-                                    settings.custom_codec == codec,
-                                    enabled,
-                                    &encoders,
-                                )
-                                .clicked()
-                                {
-                                    settings.custom_codec = codec;
+                        ui.add_space(4.0);
+                        let codec_columns: usize = if ui.available_width() >= 420.0 {
+                            3
+                        } else if ui.available_width() >= 280.0 {
+                            2
+                        } else {
+                            1
+                        };
+                        let codec_gap = 8.0;
+                        let codec_card_width = ((ui.available_width()
+                            - codec_gap * (codec_columns.saturating_sub(1) as f32))
+                            / codec_columns as f32)
+                            .max(0.0);
+                        Grid::new(ui.id().with(("advanced_codec_grid", id)))
+                            .num_columns(codec_columns)
+                            .spacing(vec2(codec_gap, codec_gap))
+                            .min_col_width(codec_card_width)
+                            .show(ui, |ui| {
+                                for (index, codec) in CodecChoice::ALL.iter().copied().enumerate() {
+                                    let enabled = encoders.supports(codec);
+                                    ui.allocate_ui_with_layout(
+                                        vec2(codec_card_width, 0.0),
+                                        Layout::top_down(Align::Min),
+                                        |ui| {
+                                            if advanced_codec_button(
+                                                ui,
+                                                theme,
+                                                codec,
+                                                settings.custom_codec == codec,
+                                                enabled,
+                                                &encoders,
+                                                codec_card_width,
+                                            )
+                                            .clicked()
+                                            {
+                                                settings.custom_codec = codec;
+                                            }
+                                        },
+                                    );
+                                    if (index + 1) % codec_columns == 0 {
+                                        ui.end_row();
+                                    }
                                 }
-                            }
-                        });
+                            });
 
                         ui.add_space(8.0);
                         ui.label(
@@ -1313,7 +1367,7 @@ impl CompressVideosPage {
                     ui.horizontal(|ui| {
                         ui.add(egui::Spinner::new().size(12.0));
                         ui.label(
-                            RichText::new("Compressingâ€¦")
+                            RichText::new("Compressing...")
                                 .size(11.0)
                                 .color(theme.colors.fg_dim),
                         );
@@ -1346,7 +1400,7 @@ fn queue_section_header(ui: &mut Ui, theme: &AppTheme, title: &str, count: usize
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.label(
-            RichText::new(format!("{title} â€” {count}"))
+            RichText::new(format!("{title} - {count}"))
                 .size(12.0)
                 .strong()
                 .color(tint),
@@ -1473,7 +1527,7 @@ fn video_queue_row(
     match &item.state {
         VideoCompressionState::Probing => {
             let g = ui.painter().layout_no_wrap(
-                "Probingâ€¦".to_owned(),
+                "Probing...".to_owned(),
                 egui::FontId::proportional(10.0),
                 theme.colors.fg_muted,
             );
@@ -1527,7 +1581,7 @@ fn video_queue_row(
         }
         VideoCompressionState::Completed(r) => {
             let text = format!(
-                "Done, {} â†’ {} ({:.1}%)",
+                "Done, {} -> {} ({:.1}%)",
                 format_bytes(r.original_size_bytes),
                 format_bytes(r.output_size_bytes),
                 r.reduction_percent.abs()
@@ -1621,6 +1675,7 @@ fn advanced_codec_button(
     selected: bool,
     enabled: bool,
     encoders: &EncoderAvailability,
+    card_width: f32,
 ) -> egui::Response {
     let (headline, detail) = match codec {
         CodecChoice::H264 => (
@@ -1665,14 +1720,23 @@ fn advanced_codec_button(
     } else {
         Stroke::new(1.0, theme.colors.border)
     };
+    let card_min_height = if card_width >= 170.0 {
+        72.0
+    } else if card_width >= 136.0 {
+        84.0
+    } else {
+        96.0
+    };
 
+    let card_margin = if card_width >= 150.0 { 10.0 } else { 8.0 };
     let frame = panel::inset(theme)
         .fill(fill)
         .stroke(stroke)
         .corner_radius(CornerRadius::ZERO)
-        .inner_margin(egui::Margin::same(10))
+        .inner_margin(egui::Margin::same(card_margin as i8))
         .show(ui, |ui| {
-            ui.set_min_size(vec2(188.0, 72.0));
+            ui.set_width((card_width - card_margin * 2.0 - 2.0).max(0.0));
+            ui.set_min_height(card_min_height);
             ui.label(
                 RichText::new(headline)
                     .size(12.0)
