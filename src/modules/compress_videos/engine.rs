@@ -17,6 +17,8 @@ use crate::{
     runtime,
 };
 
+const HARDWARE_PROBE_FRAME_SIZE: &str = "256x256";
+
 #[derive(Default)]
 pub struct VideoEngineController {
     status: EngineStatus,
@@ -461,7 +463,8 @@ fn probe_hw_null(ffmpeg_path: &Path, encoder_name: &str) -> bool {
         .arg("-f")
         .arg("lavfi")
         .arg("-i")
-        .arg("color=c=black:s=64x64:d=0.1")
+        // 64x64 is below the minimum frame size accepted by NVENC on some drivers.
+        .arg(format!("color=c=black:s={HARDWARE_PROBE_FRAME_SIZE}:d=0.1"))
         .arg("-frames:v")
         .arg("1")
         .arg("-an")
@@ -496,7 +499,7 @@ fn probe_hw_tempfile(ffmpeg_path: &Path, encoder_name: &str) -> bool {
         .arg("-f")
         .arg("lavfi")
         .arg("-i")
-        .arg("color=c=black:s=64x64:d=0.1")
+        .arg(format!("color=c=black:s={HARDWARE_PROBE_FRAME_SIZE}:d=0.1"))
         .arg("-frames:v")
         .arg("1")
         .arg("-an")
@@ -514,7 +517,6 @@ fn probe_hw_tempfile(ffmpeg_path: &Path, encoder_name: &str) -> bool {
     let _ = fs::remove_file(&temp_file);
     result
 }
-
 
 fn background_command(program: &Path) -> Command {
     let mut command = Command::new(program);
