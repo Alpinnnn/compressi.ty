@@ -4,7 +4,6 @@ pub const HELP: char = '\u{F142}';
 pub const SETTINGS: char = '\u{F43C}';
 pub const CLOSE: char = '\u{F404}';
 pub const BACK: char = '\u{F3CF}';
-pub const ADD: char = '\u{F2C7}';
 pub const DOCUMENT: char = '\u{F12F}';
 pub const FOLDER: char = '\u{F139}';
 pub const IMAGE: char = '\u{F147}';

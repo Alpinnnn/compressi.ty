@@ -29,15 +29,6 @@ pub fn tinted(theme: &AppTheme, tint: Color32) -> Frame {
         .inner_margin(Margin::same(20))
 }
 
-/// Transparent panel used for badges / chips.
-pub fn chip(theme: &AppTheme) -> Frame {
-    Frame::new()
-        .fill(theme.colors.bg_raised)
-        .stroke(Stroke::new(1.0, theme.colors.border))
-        .corner_radius(CornerRadius::ZERO)
-        .inner_margin(Margin::symmetric(12, 5))
-}
-
 /// Accent-colored chip.
 pub fn chip_accent(theme: &AppTheme, tint: Color32) -> Frame {
     Frame::new()

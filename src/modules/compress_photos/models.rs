@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+/// Preset bundles exposed in the photo compression workflow.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CompressionPreset {
     MaximumQuality,
@@ -16,6 +17,7 @@ impl CompressionPreset {
         Self::UltraCompression,
     ];
 
+    /// Returns the user-facing title for this preset.
     pub fn title(self) -> &'static str {
         match self {
             Self::MaximumQuality => "Maximum Quality",
@@ -25,6 +27,7 @@ impl CompressionPreset {
         }
     }
 
+    /// Returns the supporting copy shown below the preset title.
     pub fn description(self) -> &'static str {
         match self {
             Self::MaximumQuality => "Best fidelity with subtle size savings.",
@@ -34,6 +37,7 @@ impl CompressionPreset {
         }
     }
 
+    /// Returns the default settings bundle associated with this preset.
     pub fn defaults(self) -> PresetDefaults {
         match self {
             Self::MaximumQuality => PresetDefaults {
@@ -64,6 +68,7 @@ impl CompressionPreset {
     }
 }
 
+/// Concrete setting values associated with a compression preset.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PresetDefaults {
     pub quality: u8,
@@ -72,6 +77,7 @@ pub struct PresetDefaults {
     pub format_choice: ConvertFormat,
 }
 
+/// Output format choices available in the photo workflow.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConvertFormat {
     Original,
@@ -83,6 +89,7 @@ pub enum ConvertFormat {
 impl ConvertFormat {
     pub const ALL: [Self; 4] = [Self::Original, Self::Jpeg, Self::WebP, Self::Avif];
 
+    /// Returns the label used in the output format selector.
     pub fn label(self) -> &'static str {
         match self {
             Self::Original => "Original",
@@ -93,6 +100,7 @@ impl ConvertFormat {
     }
 }
 
+/// Source image formats currently accepted by the loader.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PhotoFormat {
     Png,
@@ -102,6 +110,7 @@ pub enum PhotoFormat {
 }
 
 impl PhotoFormat {
+    /// Infers the image format from a file path extension.
     pub fn from_path(path: &std::path::Path) -> Option<Self> {
         let ext = path.extension()?.to_str()?.to_ascii_lowercase();
 
@@ -114,6 +123,7 @@ impl PhotoFormat {
         }
     }
 
+    /// Returns the short label shown in the queue and result UI.
     pub fn label(self) -> &'static str {
         match self {
             Self::Png => "PNG",
@@ -123,6 +133,7 @@ impl PhotoFormat {
         }
     }
 
+    /// Returns the canonical file extension for this format.
     pub fn extension(self) -> &'static str {
         match self {
             Self::Png => "png",
@@ -133,6 +144,7 @@ impl PhotoFormat {
     }
 }
 
+/// Editable compression settings for the current photo batch.
 #[derive(Clone, Debug)]
 pub struct CompressionSettings {
     pub preset: CompressionPreset,
@@ -160,6 +172,7 @@ impl Default for CompressionSettings {
 }
 
 impl CompressionSettings {
+    /// Replaces the active settings with the defaults for the selected preset.
     pub fn apply_preset(&mut self, preset: CompressionPreset) {
         let defaults = preset.defaults();
         self.preset = preset;
@@ -170,6 +183,7 @@ impl CompressionSettings {
     }
 }
 
+/// Metadata about a queued source image.
 #[derive(Clone, Debug)]
 pub struct PhotoAsset {
     pub id: u64,
@@ -180,24 +194,28 @@ pub struct PhotoAsset {
     pub dimensions: (u32, u32),
 }
 
+/// Raw RGBA preview pixels for a photo thumbnail or preview image.
 #[derive(Clone, Debug)]
 pub struct PhotoPreview {
     pub rgba: Vec<u8>,
     pub size: [usize; 2],
 }
 
+/// Fully loaded photo data ready to be inserted into the queue.
 #[derive(Clone, Debug)]
 pub struct LoadedPhoto {
     pub asset: PhotoAsset,
     pub preview: Option<PhotoPreview>,
 }
 
+/// Progress information for a file that is currently being compressed.
 #[derive(Clone, Debug)]
 pub struct FileProgress {
     pub progress: f32,
     pub stage: String,
 }
 
+/// Completed output information for a compressed photo.
 #[derive(Clone, Debug)]
 pub struct CompressionResult {
     pub output_path: PathBuf,
@@ -207,6 +225,7 @@ pub struct CompressionResult {
     pub reduction_percent: f32,
 }
 
+/// End-user visible state for a queue item in the photo workflow.
 #[derive(Clone, Debug)]
 pub enum CompressionState {
     Ready,

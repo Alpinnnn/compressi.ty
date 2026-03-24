@@ -34,6 +34,12 @@ pub struct CompressityApp {
 }
 
 impl CompressityApp {
+    fn request_repaint_if_needed(ctx: &egui::Context, repaint_after: Option<std::time::Duration>) {
+        if let Some(repaint_after) = repaint_after {
+            ctx.request_repaint_after(repaint_after);
+        }
+    }
+
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         pending_launch_import: LaunchImport,
@@ -83,10 +89,10 @@ impl CompressityApp {
         }
     }
 
-    fn apply_pending_launch_import(&mut self, ctx: &egui::Context) {
+    fn apply_pending_launch_import(&mut self) {
         if self.pending_launch_import.has_photo_paths() {
             let photo_paths = self.pending_launch_import.take_photo_paths();
-            self.compress_photos.queue_external_paths(ctx, photo_paths);
+            self.compress_photos.queue_external_paths(photo_paths);
         }
 
         if self.pending_launch_import.has_video_paths() && self.video_engine.active_info().is_some()
@@ -207,10 +213,10 @@ impl CompressityApp {
 impl eframe::App for CompressityApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_external_launches(ctx);
-        self.video_engine.poll(ctx);
-        self.apply_pending_launch_import(ctx);
-        self.compress_photos.poll_background(ctx);
-        self.compress_videos.poll_background(ctx);
+        Self::request_repaint_if_needed(ctx, self.video_engine.poll());
+        self.apply_pending_launch_import();
+        Self::request_repaint_if_needed(ctx, self.compress_photos.poll_background());
+        Self::request_repaint_if_needed(ctx, self.compress_videos.poll_background());
         self.handle_close_request(ctx);
 
         if !self.compress_photos.is_compressing() && !self.compress_videos.is_compressing() {
