@@ -267,6 +267,12 @@ fn render_engine_card(
                 if info.encoders.h264_amd || info.encoders.h265_amd || info.encoders.av1_amd {
                     gpu_backends.push("AMD");
                 }
+                if info.encoders.h264_intel_qsv
+                    || info.encoders.h265_intel_qsv
+                    || info.encoders.av1_intel_qsv
+                {
+                    gpu_backends.push("Intel Quick Sync");
+                }
                 if !gpu_backends.is_empty() {
                     ui.label(
                         RichText::new(format!("Auto GPU encode: {}", gpu_backends.join(", ")))

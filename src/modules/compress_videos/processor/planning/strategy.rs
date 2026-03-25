@@ -9,7 +9,7 @@ pub(in crate::modules::compress_videos::processor) struct EncodePlan {
     pub(in crate::modules::compress_videos::processor) video_bitrate_kbps: u32,
     pub(in crate::modules::compress_videos::processor) audio_bitrate_kbps: Option<u32>,
     pub(in crate::modules::compress_videos::processor) crf: Option<u8>,
-    /// CQ value for hardware encoder quality-based VBR (NVENC `-cq:v`).
+    /// Quality value for hardware encoders (`-cq:v` or `-global_quality`).
     pub(in crate::modules::compress_videos::processor) hardware_cq: Option<u8>,
     pub(in crate::modules::compress_videos::processor) preset: Option<String>,
     pub(in crate::modules::compress_videos::processor) output_width: u32,
@@ -323,6 +323,16 @@ fn encoder_preset(
                     "quality"
                 } else {
                     "balanced"
+                }
+                .to_owned(),
+            ),
+            EncoderBackend::IntelQuickSync => Some(
+                if preview_mode {
+                    "veryfast"
+                } else if aggressive {
+                    "slow"
+                } else {
+                    "medium"
                 }
                 .to_owned(),
             ),

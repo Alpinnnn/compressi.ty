@@ -70,6 +70,12 @@ fn inspect_engine(
         && probe_hardware_encoder(&ffmpeg_path, "hevc_amf");
     let av1_amd = encoder_list_contains(&encoders_output, "av1_amf")
         && probe_hardware_encoder(&ffmpeg_path, "av1_amf");
+    let h264_intel_qsv = encoder_list_contains(&encoders_output, "h264_qsv")
+        && probe_hardware_encoder(&ffmpeg_path, "h264_qsv");
+    let h265_intel_qsv = encoder_list_contains(&encoders_output, "hevc_qsv")
+        && probe_hardware_encoder(&ffmpeg_path, "hevc_qsv");
+    let av1_intel_qsv = encoder_list_contains(&encoders_output, "av1_qsv")
+        && probe_hardware_encoder(&ffmpeg_path, "av1_qsv");
 
     Ok(EngineInfo {
         version: version_output
@@ -81,15 +87,18 @@ fn inspect_engine(
         ffmpeg_path,
         ffprobe_path,
         encoders: EncoderAvailability {
-            h264: h264_software || h264_nvidia || h264_amd,
-            h265: h265_software || h265_nvidia || h265_amd,
-            av1: av1_software || av1_nvidia || av1_amd,
+            h264: h264_software || h264_nvidia || h264_amd || h264_intel_qsv,
+            h265: h265_software || h265_nvidia || h265_amd || h265_intel_qsv,
+            av1: av1_software || av1_nvidia || av1_amd || av1_intel_qsv,
             h264_nvidia,
             h265_nvidia,
             av1_nvidia,
             h264_amd,
             h265_amd,
             av1_amd,
+            h264_intel_qsv,
+            h265_intel_qsv,
+            av1_intel_qsv,
         },
         source,
     })
@@ -111,6 +120,7 @@ fn probe_hardware_encoder(ffmpeg_path: &Path, encoder_name: &str) -> bool {
 
 fn probe_hw_null(ffmpeg_path: &Path, encoder_name: &str) -> bool {
     let null_device = if cfg!(windows) { "NUL" } else { "/dev/null" };
+    let probe_pixel_format = hardware_probe_pixel_format(encoder_name);
 
     let mut command = background_command(ffmpeg_path);
     command
@@ -126,7 +136,7 @@ fn probe_hw_null(ffmpeg_path: &Path, encoder_name: &str) -> bool {
         .arg("-c:v")
         .arg(encoder_name)
         .arg("-pix_fmt")
-        .arg("yuv420p")
+        .arg(probe_pixel_format)
         .arg("-f")
         .arg("null")
         .arg(null_device);
@@ -144,6 +154,7 @@ fn probe_hw_tempfile(ffmpeg_path: &Path, encoder_name: &str) -> bool {
     }
 
     let temp_file = temp_dir.join(format!("{encoder_name}_probe.mp4"));
+    let probe_pixel_format = hardware_probe_pixel_format(encoder_name);
 
     let mut command = background_command(ffmpeg_path);
     command
@@ -159,7 +170,7 @@ fn probe_hw_tempfile(ffmpeg_path: &Path, encoder_name: &str) -> bool {
         .arg("-c:v")
         .arg(encoder_name)
         .arg("-pix_fmt")
-        .arg("yuv420p")
+        .arg(probe_pixel_format)
         .arg(&temp_file);
 
     let result = command
@@ -169,4 +180,13 @@ fn probe_hw_tempfile(ffmpeg_path: &Path, encoder_name: &str) -> bool {
 
     let _ = fs::remove_file(&temp_file);
     result
+}
+
+fn hardware_probe_pixel_format(encoder_name: &str) -> &'static str {
+    // QSV is most reliable with NV12 input frames for 8-bit encode probes.
+    if encoder_name.ends_with("_qsv") {
+        "nv12"
+    } else {
+        "yuv420p"
+    }
 }

@@ -39,6 +39,11 @@ pub(super) fn estimate_processing_time(video: &VideoMetadata, plan: &EncodePlan)
             CodecChoice::H265 => 3.5,
             CodecChoice::Av1 => 2.4,
         },
+        EncoderBackend::IntelQuickSync => match plan.encoder.codec {
+            CodecChoice::H264 => 4.8,
+            CodecChoice::H265 => 3.7,
+            CodecChoice::Av1 => 2.6,
+        },
     };
     let speed_x = (base_speed / complexity).clamp(0.08, 10.0);
     (video.duration_secs * plan.pass_count as f32) / speed_x

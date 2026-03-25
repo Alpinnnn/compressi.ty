@@ -28,10 +28,6 @@ pub(in crate::modules::compress_videos::processor) fn build_encode_command(
         .arg("-stats_period")
         .arg("0.25");
 
-    if plan.encoder.is_hardware() {
-        command.arg("-hwaccel").arg("auto");
-    }
-
     if start_secs > 0.0 {
         command.arg("-ss").arg(format_time_arg(start_secs));
     }
@@ -83,7 +79,12 @@ fn apply_video_filters(command: &mut Command, video: &VideoMetadata, plan: &Enco
     let filter = build_filter_chain(video, plan);
 
     if plan.encoder.is_hardware() {
-        let pixel_filter = "format=yuv420p";
+        let pixel_filter = match plan.encoder.backend {
+            EncoderBackend::IntelQuickSync => "format=nv12",
+            EncoderBackend::Software | EncoderBackend::Nvidia | EncoderBackend::Amd => {
+                "format=yuv420p"
+            }
+        };
         if filter.is_empty() {
             command.arg("-vf").arg(pixel_filter);
         } else {
@@ -99,18 +100,42 @@ fn apply_rate_control(command: &mut Command, plan: &EncodePlan) {
         Some(crf) => {
             command.arg("-crf").arg(crf.to_string());
         }
-        None => {
-            if let Some(hardware_cq) = plan.hardware_cq.filter(|_| plan.encoder.is_hardware()) {
-                command
-                    .arg("-rc:v")
-                    .arg("vbr")
-                    .arg("-cq:v")
-                    .arg(hardware_cq.to_string())
-                    .arg("-b:v")
-                    .arg(format!("{}k", plan.video_bitrate_kbps))
-                    .arg("-maxrate")
-                    .arg(format!("{}k", plan.video_bitrate_kbps.saturating_mul(2)));
-            } else {
+        None => match plan.encoder.backend {
+            EncoderBackend::IntelQuickSync => {
+                if let Some(hardware_cq) = plan.hardware_cq {
+                    command.arg("-global_quality").arg(hardware_cq.to_string());
+                } else {
+                    command
+                        .arg("-b:v")
+                        .arg(format!("{}k", plan.video_bitrate_kbps))
+                        .arg("-maxrate")
+                        .arg(format!("{}k", plan.video_bitrate_kbps))
+                        .arg("-bufsize")
+                        .arg(format!("{}k", plan.video_bitrate_kbps.saturating_mul(2)));
+                }
+            }
+            EncoderBackend::Nvidia | EncoderBackend::Amd => {
+                if let Some(hardware_cq) = plan.hardware_cq {
+                    command
+                        .arg("-rc:v")
+                        .arg("vbr")
+                        .arg("-cq:v")
+                        .arg(hardware_cq.to_string())
+                        .arg("-b:v")
+                        .arg(format!("{}k", plan.video_bitrate_kbps))
+                        .arg("-maxrate")
+                        .arg(format!("{}k", plan.video_bitrate_kbps.saturating_mul(2)));
+                } else {
+                    command
+                        .arg("-b:v")
+                        .arg(format!("{}k", plan.video_bitrate_kbps))
+                        .arg("-maxrate")
+                        .arg(format!("{}k", plan.video_bitrate_kbps))
+                        .arg("-bufsize")
+                        .arg(format!("{}k", plan.video_bitrate_kbps.saturating_mul(2)));
+                }
+            }
+            EncoderBackend::Software => {
                 command
                     .arg("-b:v")
                     .arg(format!("{}k", plan.video_bitrate_kbps))
@@ -119,7 +144,7 @@ fn apply_rate_control(command: &mut Command, plan: &EncodePlan) {
                     .arg("-bufsize")
                     .arg(format!("{}k", plan.video_bitrate_kbps.saturating_mul(2)));
             }
-        }
+        },
     }
 }
 

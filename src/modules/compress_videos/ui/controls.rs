@@ -59,6 +59,11 @@ pub(super) fn advanced_codec_button(
         || codec == CodecChoice::Av1 && encoders.av1_amd
     {
         "Auto GPU: AMD"
+    } else if codec == CodecChoice::H264 && encoders.h264_intel_qsv
+        || codec == CodecChoice::H265 && encoders.h265_intel_qsv
+        || codec == CodecChoice::Av1 && encoders.av1_intel_qsv
+    {
+        "Auto GPU: Intel Quick Sync"
     } else if enabled {
         "CPU encode"
     } else {

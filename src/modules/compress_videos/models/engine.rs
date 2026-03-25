@@ -8,6 +8,7 @@ pub enum EncoderBackend {
     Software,
     Nvidia,
     Amd,
+    IntelQuickSync,
 }
 
 /// The exact codec and backend selected for a compression plan.
@@ -28,6 +29,9 @@ impl ResolvedEncoder {
             (EncoderBackend::Amd, CodecChoice::H264) => "h264_amf",
             (EncoderBackend::Amd, CodecChoice::H265) => "hevc_amf",
             (EncoderBackend::Amd, CodecChoice::Av1) => "av1_amf",
+            (EncoderBackend::IntelQuickSync, CodecChoice::H264) => "h264_qsv",
+            (EncoderBackend::IntelQuickSync, CodecChoice::H265) => "hevc_qsv",
+            (EncoderBackend::IntelQuickSync, CodecChoice::Av1) => "av1_qsv",
         }
     }
 
@@ -49,6 +53,9 @@ pub struct EncoderAvailability {
     pub h264_amd: bool,
     pub h265_amd: bool,
     pub av1_amd: bool,
+    pub h264_intel_qsv: bool,
+    pub h265_intel_qsv: bool,
+    pub av1_intel_qsv: bool,
 }
 
 impl EncoderAvailability {
@@ -99,6 +106,9 @@ impl EncoderAvailability {
             CodecChoice::H264 if self.h264_amd => EncoderBackend::Amd,
             CodecChoice::H265 if self.h265_amd => EncoderBackend::Amd,
             CodecChoice::Av1 if self.av1_amd => EncoderBackend::Amd,
+            CodecChoice::H264 if self.h264_intel_qsv => EncoderBackend::IntelQuickSync,
+            CodecChoice::H265 if self.h265_intel_qsv => EncoderBackend::IntelQuickSync,
+            CodecChoice::Av1 if self.av1_intel_qsv => EncoderBackend::IntelQuickSync,
             _ => EncoderBackend::Software,
         };
 
@@ -160,6 +170,8 @@ mod tests {
         let encoders = EncoderAvailability {
             h264: true,
             h264_nvidia: true,
+            h264_amd: true,
+            h264_intel_qsv: true,
             ..Default::default()
         };
 
@@ -178,5 +190,32 @@ mod tests {
         let resolved = encoders.resolved_encoder(CodecChoice::H265);
 
         assert_eq!(resolved.backend, EncoderBackend::Software);
+    }
+
+    #[test]
+    fn keeps_amd_priority_over_intel_quick_sync() {
+        let encoders = EncoderAvailability {
+            h265: true,
+            h265_amd: true,
+            h265_intel_qsv: true,
+            ..Default::default()
+        };
+
+        let resolved = encoders.resolved_encoder(CodecChoice::H265);
+
+        assert_eq!(resolved.backend, EncoderBackend::Amd);
+    }
+
+    #[test]
+    fn uses_intel_quick_sync_when_it_is_the_only_gpu_backend() {
+        let encoders = EncoderAvailability {
+            av1: true,
+            av1_intel_qsv: true,
+            ..Default::default()
+        };
+
+        let resolved = encoders.resolved_encoder(CodecChoice::Av1);
+
+        assert_eq!(resolved.backend, EncoderBackend::IntelQuickSync);
     }
 }

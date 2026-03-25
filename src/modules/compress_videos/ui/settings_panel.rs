@@ -215,6 +215,13 @@ fn render_encoder_badge(
             format!("\u{26A1} GPU: AMD ({})", resolved.ffmpeg_name()),
             theme.colors.accent,
         ),
+        EncoderBackend::IntelQuickSync => (
+            format!(
+                "\u{26A1} GPU: Intel Quick Sync ({})",
+                resolved.ffmpeg_name()
+            ),
+            theme.colors.accent,
+        ),
         EncoderBackend::Software => (
             format!("\u{1F5A5} CPU Encoding ({})", resolved.ffmpeg_name()),
             theme.colors.fg_muted,
