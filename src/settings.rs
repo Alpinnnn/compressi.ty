@@ -3,11 +3,23 @@ use std::{fs, path::PathBuf};
 use crate::runtime;
 
 /// Persistent application settings, serialised to a JSON file in the user's config directory.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AppSettings {
     pub default_output_folder: Option<PathBuf>,
     pub photo_output_folder: Option<PathBuf>,
     pub video_output_folder: Option<PathBuf>,
+    pub use_hardware_acceleration: bool,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            default_output_folder: None,
+            photo_output_folder: None,
+            video_output_folder: None,
+            use_hardware_acceleration: true,
+        }
+    }
 }
 
 impl AppSettings {
@@ -56,10 +68,15 @@ impl AppSettings {
 
     fn to_json(&self) -> Result<String, ()> {
         Ok(format!(
-            "{{\"default_output_folder\":{},\"photo_output_folder\":{},\"video_output_folder\":{}}}",
+            "{{\"default_output_folder\":{},\"photo_output_folder\":{},\"video_output_folder\":{},\"use_hardware_acceleration\":{}}}",
             path_to_json_value(self.default_output_folder.as_ref()),
             path_to_json_value(self.photo_output_folder.as_ref()),
             path_to_json_value(self.video_output_folder.as_ref()),
+            if self.use_hardware_acceleration {
+                "true"
+            } else {
+                "false"
+            },
         ))
     }
 
@@ -74,6 +91,9 @@ impl AppSettings {
             default_output_folder: parse_optional_path_field(text, "default_output_folder").ok()?,
             photo_output_folder: parse_optional_path_field(text, "photo_output_folder").ok()?,
             video_output_folder: parse_optional_path_field(text, "video_output_folder").ok()?,
+            use_hardware_acceleration: parse_optional_bool_field(text, "use_hardware_acceleration")
+                .ok()?
+                .unwrap_or(true),
         })
     }
 }
@@ -144,6 +164,27 @@ fn parse_json_string(input: &str) -> Option<String> {
     None
 }
 
+fn parse_optional_bool_field(text: &str, field: &str) -> Result<Option<bool>, ()> {
+    let key = format!("\"{field}\"");
+    let Some(key_pos) = text.find(&key) else {
+        return Ok(None);
+    };
+
+    let after_key = &text[key_pos + key.len()..];
+    let Some(colon_pos) = after_key.find(':') else {
+        return Err(());
+    };
+    let after_colon = after_key[colon_pos + 1..].trim_start();
+
+    if after_colon.starts_with("true") {
+        Ok(Some(true))
+    } else if after_colon.starts_with("false") {
+        Ok(Some(false))
+    } else {
+        Err(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::AppSettings;
@@ -160,6 +201,7 @@ mod tests {
         );
         assert_eq!(settings.photo_output_folder, None);
         assert_eq!(settings.video_output_folder, None);
+        assert!(settings.use_hardware_acceleration);
     }
 
     #[test]
@@ -168,6 +210,7 @@ mod tests {
             default_output_folder: Some(PathBuf::from(r"C:\Exports")),
             photo_output_folder: Some(PathBuf::from(r"D:\Photos")),
             video_output_folder: Some(PathBuf::from(r"E:\Videos")),
+            use_hardware_acceleration: false,
         };
 
         let encoded = settings.to_json().unwrap();

@@ -1,6 +1,9 @@
 use eframe::egui::{self, Button, CornerRadius, RichText, Sense, Stroke, Ui};
 
-use crate::{theme::AppTheme, ui::components::panel};
+use crate::{
+    theme::AppTheme,
+    ui::components::{hint, panel},
+};
 
 use super::super::models::{CompressionPreset, ConvertFormat};
 
@@ -9,11 +12,18 @@ pub(super) fn format_selector(ui: &mut Ui, theme: &AppTheme, format_choice: &mut
     let selected_fill = theme.mix(theme.colors.surface, accent, 0.10);
     let selected_stroke = Stroke::new(1.0, theme.mix(theme.colors.border_focus, accent, 0.22));
 
-    ui.label(
-        RichText::new("Format")
-            .size(12.0)
-            .color(theme.colors.fg_dim),
-    );
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("Format")
+                .size(12.0)
+                .color(theme.colors.fg_dim),
+        );
+        hint::badge(
+            ui,
+            theme,
+            "Original keeps the source format. Pick another option to convert every export.",
+        );
+    });
     ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
         for format in ConvertFormat::ALL {
@@ -74,22 +84,8 @@ pub(super) fn preset_row(
         .inner_margin(egui::Margin::same(12))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            ui.set_min_height(68.0);
-            ui.label(
-                RichText::new(preset.title())
-                    .size(12.0)
-                    .strong()
-                    .color(theme.colors.fg),
-            );
-            ui.add_sized(
-                [ui.available_width(), 0.0],
-                egui::Label::new(
-                    RichText::new(preset.description())
-                        .size(11.0)
-                        .color(theme.colors.fg_dim),
-                )
-                .wrap(),
-            );
+            ui.set_min_height(48.0);
+            hint::title(ui, theme, preset.title(), 12.0, Some(preset.description()));
         });
 
     ui.interact(
@@ -97,4 +93,5 @@ pub(super) fn preset_row(
         ui.id().with(preset.title()),
         Sense::click(),
     )
+    .on_hover_text(preset.description())
 }

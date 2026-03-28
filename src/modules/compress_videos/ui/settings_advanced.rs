@@ -5,6 +5,7 @@ use crate::{
         CodecChoice, EncoderAvailability, ResolutionChoice, VideoMetadata, VideoSettings,
     },
     theme::AppTheme,
+    ui::components::hint,
 };
 
 use super::controls::{
@@ -27,30 +28,25 @@ pub(super) fn render_advanced_controls(
         .clamp(350, 80_000);
     let source_fps = metadata.fps.round().clamp(12.0, 120.0) as u32;
 
-    ui.label(
-        RichText::new(
-            "Fine-tune bitrate, codec, resolution, frame rate, and audio. Compatible GPU encoders are used automatically when available.",
-        )
-        .size(11.5)
-        .color(theme.colors.fg_dim),
-    );
-    ui.add_space(8.0);
-
     render_advanced_codec_controls(ui, theme, selected_id, encoders, settings);
     ui.add_space(8.0);
 
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("Video Bitrate")
+                .size(12.0)
+                .color(theme.colors.fg_dim),
+        );
+        hint::badge(
+            ui,
+            theme,
+            "Lower bitrate reduces size faster, but detail and motion clarity can soften.",
+        );
+    });
     ui.label(
-        RichText::new("Video Bitrate")
-            .size(12.0)
-            .color(theme.colors.fg_dim),
-    );
-    ui.label(
-        RichText::new(format!(
-            "Source video: {}. Lower values shrink file size faster.",
-            format_kbps(source_video_kbps)
-        ))
-        .size(10.5)
-        .color(theme.colors.fg_muted),
+        RichText::new(format!("Source: {}", format_kbps(source_video_kbps)))
+            .size(10.5)
+            .color(theme.colors.fg_muted),
     );
     ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
@@ -82,16 +78,18 @@ pub(super) fn render_advanced_controls(
     );
 
     ui.add_space(8.0);
-    ui.label(
-        RichText::new("Resolution")
-            .size(12.0)
-            .color(theme.colors.fg_dim),
-    );
-    ui.label(
-        RichText::new("Reduce resolution when size matters more than detail.")
-            .size(10.5)
-            .color(theme.colors.fg_muted),
-    );
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("Resolution")
+                .size(12.0)
+                .color(theme.colors.fg_dim),
+        );
+        hint::badge(
+            ui,
+            theme,
+            "Lower resolution helps when you need much smaller files than the source.",
+        );
+    });
     ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
         for choice in ResolutionChoice::ADVANCED {
@@ -102,18 +100,18 @@ pub(super) fn render_advanced_controls(
     });
 
     ui.add_space(8.0);
-    ui.label(
-        RichText::new("Frame Rate")
-            .size(12.0)
-            .color(theme.colors.fg_dim),
-    );
-    ui.label(
-        RichText::new(
-            "Lower FPS can help screen recordings and talking-head videos compress smaller.",
-        )
-        .size(10.5)
-        .color(theme.colors.fg_muted),
-    );
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("Frame Rate")
+                .size(12.0)
+                .color(theme.colors.fg_dim),
+        );
+        hint::badge(
+            ui,
+            theme,
+            "Lower FPS usually works best for screen recordings or low-motion clips.",
+        );
+    });
     ui.add_space(4.0);
     let fps_choices = frame_rate_choices(source_fps);
     ui.horizontal_wrapped(|ui| {
@@ -147,7 +145,14 @@ fn render_advanced_codec_controls(
     encoders: &EncoderAvailability,
     settings: &mut VideoSettings,
 ) {
-    ui.label(RichText::new("Codec").size(12.0).color(theme.colors.fg_dim));
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Codec").size(12.0).color(theme.colors.fg_dim));
+        hint::badge(
+            ui,
+            theme,
+            "H.264 is safest, while H.265 and AV1 usually compress smaller on supported devices.",
+        );
+    });
     ui.add_space(4.0);
     let codec_columns: usize = if ui.available_width() >= 420.0 {
         3
@@ -201,7 +206,14 @@ fn render_audio_controls(
     metadata: &VideoMetadata,
     settings: &mut VideoSettings,
 ) {
-    ui.label(RichText::new("Audio").size(12.0).color(theme.colors.fg_dim));
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Audio").size(12.0).color(theme.colors.fg_dim));
+        hint::badge(
+            ui,
+            theme,
+            "Disable audio for silent clips or lower the bitrate to save more space.",
+        );
+    });
     if metadata.has_audio {
         ui.checkbox(&mut settings.custom_audio_enabled, "Keep audio track");
         if settings.custom_audio_enabled {

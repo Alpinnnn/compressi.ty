@@ -114,6 +114,20 @@ impl EncoderAvailability {
 
         ResolvedEncoder { codec, backend }
     }
+
+    /// Returns encoder availability filtered by the global hardware acceleration preference.
+    pub fn with_hardware_acceleration(&self, enabled: bool) -> Self {
+        if enabled {
+            return self.clone();
+        }
+
+        Self {
+            h264: self.h264,
+            h265: self.h265,
+            av1: self.av1,
+            ..Default::default()
+        }
+    }
 }
 
 /// Where the active FFmpeg toolchain comes from.
@@ -217,5 +231,22 @@ mod tests {
         let resolved = encoders.resolved_encoder(CodecChoice::Av1);
 
         assert_eq!(resolved.backend, EncoderBackend::IntelQuickSync);
+    }
+
+    #[test]
+    fn strips_gpu_backends_when_hardware_acceleration_is_disabled() {
+        let encoders = EncoderAvailability {
+            h264: true,
+            h264_nvidia: true,
+            h264_amd: true,
+            h264_intel_qsv: true,
+            ..Default::default()
+        };
+
+        let resolved = encoders
+            .with_hardware_acceleration(false)
+            .resolved_encoder(CodecChoice::H264);
+
+        assert_eq!(resolved.backend, EncoderBackend::Software);
     }
 }

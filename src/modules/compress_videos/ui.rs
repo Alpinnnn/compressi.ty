@@ -1,6 +1,8 @@
 mod chrome;
 mod controls;
 mod layout;
+mod preview;
+mod preview_helpers;
 mod queue;
 mod settings_advanced;
 mod settings_panel;
@@ -40,10 +42,7 @@ pub(super) fn truncate_filename(name: &str, max_chars: usize) -> String {
 }
 
 pub(super) fn is_video_settings_editable(state: &VideoCompressionState) -> bool {
-    !matches!(
-        state,
-        VideoCompressionState::Compressing(_) | VideoCompressionState::Completed(_)
-    )
+    matches!(state, VideoCompressionState::Ready)
 }
 
 impl CompressVideosPage {

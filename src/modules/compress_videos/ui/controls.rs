@@ -5,7 +5,7 @@ use crate::{
         CodecChoice, CompressionMode, EncoderAvailability, VideoMetadata,
     },
     theme::AppTheme,
-    ui::components::panel,
+    ui::components::{hint, panel},
 };
 
 pub(super) fn choice_button(
@@ -84,11 +84,11 @@ pub(super) fn advanced_codec_button(
         Stroke::new(1.0, theme.colors.border)
     };
     let card_min_height = if card_width >= 170.0 {
-        72.0
+        54.0
     } else if card_width >= 136.0 {
-        84.0
+        62.0
     } else {
-        96.0
+        70.0
     };
 
     let card_margin = if card_width >= 150.0 { 10.0 } else { 8.0 };
@@ -100,25 +100,19 @@ pub(super) fn advanced_codec_button(
         .show(ui, |ui| {
             ui.set_width((card_width - card_margin * 2.0 - 2.0).max(0.0));
             ui.set_min_height(card_min_height);
-            ui.label(
-                RichText::new(headline)
-                    .size(12.0)
-                    .strong()
-                    .color(if enabled {
-                        theme.colors.fg
-                    } else {
-                        theme.colors.fg_muted
-                    }),
-            );
-            ui.add_sized(
-                [ui.available_width(), 0.0],
-                egui::Label::new(RichText::new(detail).size(10.5).color(if enabled {
-                    theme.colors.fg_dim
-                } else {
-                    theme.colors.fg_muted
-                }))
-                .wrap(),
-            );
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(headline)
+                        .size(12.0)
+                        .strong()
+                        .color(if enabled {
+                            theme.colors.fg
+                        } else {
+                            theme.colors.fg_muted
+                        }),
+                );
+                hint::badge(ui, theme, detail);
+            });
             ui.add_space(4.0);
             ui.label(RichText::new(backend).size(10.0).color(if enabled {
                 theme.colors.accent
@@ -136,6 +130,7 @@ pub(super) fn advanced_codec_button(
             Sense::hover()
         },
     )
+    .on_hover_text(detail)
 }
 
 pub(super) fn advanced_bitrate_presets(
@@ -241,22 +236,8 @@ pub(super) fn mode_card(
         .inner_margin(egui::Margin::same(12))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            ui.set_min_height(52.0);
-            ui.label(
-                RichText::new(mode.title())
-                    .size(12.0)
-                    .strong()
-                    .color(theme.colors.fg),
-            );
-            ui.add_sized(
-                [ui.available_width(), 0.0],
-                egui::Label::new(
-                    RichText::new(mode.description())
-                        .size(11.0)
-                        .color(theme.colors.fg_dim),
-                )
-                .wrap(),
-            );
+            ui.set_min_height(46.0);
+            hint::title(ui, theme, mode.title(), 12.0, Some(mode.description()));
         });
 
     ui.interact(
@@ -264,4 +245,5 @@ pub(super) fn mode_card(
         ui.id().with(mode.title()),
         Sense::click(),
     )
+    .on_hover_text(mode.description())
 }

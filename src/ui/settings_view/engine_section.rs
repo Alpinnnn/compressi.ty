@@ -6,7 +6,7 @@ use crate::{
         models::{EngineInfo, EngineStatus},
     },
     theme::AppTheme,
-    ui::components::panel,
+    ui::components::{hint, panel},
 };
 
 pub(super) fn render_engine_settings(
@@ -19,51 +19,17 @@ pub(super) fn render_engine_settings(
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
 
-            ui.label(
-                RichText::new("Video Engine")
-                    .size(16.0)
-                    .strong()
-                    .color(theme.colors.fg),
-            );
-            ui.add_space(4.0);
-            ui.label(
-                RichText::new(
-                    "The installer can ship a bundled FFmpeg build. Any update you install from here is stored in app data so the installation folder stays read-only.",
-                )
-                .size(12.0)
-                .color(theme.colors.fg_dim),
+            hint::title(
+                ui,
+                theme,
+                "Video Engine",
+                16.0,
+                Some(
+                    "Bundled FFmpeg stays with the app. Updates installed here are stored in app data.",
+                ),
             );
             ui.add_space(16.0);
 
-            render_engine_activity(ui, theme, video_engine.status());
-
-            if let Some(error) = video_engine.last_error() {
-                ui.add_space(8.0);
-                panel::tinted(theme, theme.colors.negative)
-                    .inner_margin(egui::Margin::same(12))
-                    .show(ui, |ui| {
-                        ui.label(RichText::new(error).size(11.5).color(theme.colors.fg));
-                    });
-            }
-
-            ui.add_space(12.0);
-            render_engine_card(ui, theme, "Active Engine", video_engine.active_info(), true);
-            ui.add_space(8.0);
-            render_engine_card(ui, theme, "Bundled Engine", video_engine.bundled_info(), false);
-            ui.add_space(8.0);
-            render_engine_card(ui, theme, "Managed Update", video_engine.managed_info(), false);
-
-            if let Some(system) = video_engine.system_info()
-                && video_engine
-                    .active_info()
-                    .map(|active| active.source != system.source)
-                    .unwrap_or(true)
-            {
-                ui.add_space(8.0);
-                render_engine_card(ui, theme, "System PATH", Some(system), false);
-            }
-
-            ui.add_space(12.0);
             ui.horizontal_wrapped(|ui| {
                 if ui
                     .add_enabled(
@@ -155,6 +121,54 @@ pub(super) fn render_engine_settings(
                     let _ = open::that(dir);
                 }
             });
+
+            ui.add_space(12.0);
+            egui::CollapsingHeader::new("Video Engine Details")
+                .id_salt("settings_video_engine_details")
+                .default_open(false)
+                .show(ui, |ui| {
+                    ui.add_space(8.0);
+
+                    render_engine_activity(ui, theme, video_engine.status());
+
+                    if let Some(error) = video_engine.last_error() {
+                        ui.add_space(8.0);
+                        panel::tinted(theme, theme.colors.negative)
+                            .inner_margin(egui::Margin::same(12))
+                            .show(ui, |ui| {
+                                ui.label(RichText::new(error).size(11.5).color(theme.colors.fg));
+                            });
+                    }
+
+                    ui.add_space(12.0);
+                    render_engine_card(ui, theme, "Active Engine", video_engine.active_info(), true);
+                    ui.add_space(8.0);
+                    render_engine_card(
+                        ui,
+                        theme,
+                        "Bundled Engine",
+                        video_engine.bundled_info(),
+                        false,
+                    );
+                    ui.add_space(8.0);
+                    render_engine_card(
+                        ui,
+                        theme,
+                        "Managed Update",
+                        video_engine.managed_info(),
+                        false,
+                    );
+
+                    if let Some(system) = video_engine.system_info()
+                        && video_engine
+                            .active_info()
+                            .map(|active| active.source != system.source)
+                            .unwrap_or(true)
+                    {
+                        ui.add_space(8.0);
+                        render_engine_card(ui, theme, "System PATH", Some(system), false);
+                    }
+                });
         });
 }
 

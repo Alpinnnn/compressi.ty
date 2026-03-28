@@ -2,7 +2,12 @@ use std::path::PathBuf;
 
 use eframe::egui::{self, Button, Color32, CornerRadius, RichText, Stroke, Ui};
 
-use crate::{icons, runtime, settings::AppSettings, theme::AppTheme, ui::components::panel};
+use crate::{
+    icons, runtime,
+    settings::AppSettings,
+    theme::AppTheme,
+    ui::components::{hint, panel},
+};
 
 pub(super) fn render_output_settings(ui: &mut Ui, theme: &AppTheme, settings: &mut AppSettings) {
     panel::card(theme)
@@ -10,17 +15,12 @@ pub(super) fn render_output_settings(ui: &mut Ui, theme: &AppTheme, settings: &m
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
 
-            ui.label(
-                RichText::new("Output")
-                    .size(16.0)
-                    .strong()
-                    .color(theme.colors.fg),
-            );
-            ui.add_space(4.0);
-            ui.label(
-                RichText::new("Configure where compressed files are saved by default.")
-                    .size(12.0)
-                    .color(theme.colors.fg_dim),
+            hint::title(
+                ui,
+                theme,
+                "Output",
+                16.0,
+                Some("Choose the default save location for compressed files."),
             );
             ui.add_space(16.0);
 
@@ -37,47 +37,58 @@ pub(super) fn render_output_settings(ui: &mut Ui, theme: &AppTheme, settings: &m
 
             ui.add_space(14.0);
 
-            let photo_fallback = settings
-                .default_output_folder
-                .as_ref()
-                .map(|dir| format!("Not set - uses Default Output Folder ({})", dir.display()))
-                .unwrap_or_else(|| {
-                    format!(
-                        "Not set - uses {}",
-                        runtime::default_photo_output_root().display()
-                    )
-                });
-            render_output_folder_field(
-                ui,
-                theme,
-                "Photo Output Folder",
-                "Overrides the default output location for Compress Photos. Leave empty to follow Default Output Folder.",
-                &mut settings.photo_output_folder,
-                &photo_fallback,
-                "Use Default Output Folder",
-            );
+            egui::CollapsingHeader::new("Photo & Video Overrides")
+                .id_salt("settings_output_overrides")
+                .default_open(false)
+                .show(ui, |ui| {
+                    ui.add_space(8.0);
 
-            ui.add_space(14.0);
+                    let photo_fallback = settings
+                        .default_output_folder
+                        .as_ref()
+                        .map(|dir| {
+                            format!("Not set - uses Default Output Folder ({})", dir.display())
+                        })
+                        .unwrap_or_else(|| {
+                            format!(
+                                "Not set - uses {}",
+                                runtime::default_photo_output_root().display()
+                            )
+                        });
+                    render_output_folder_field(
+                        ui,
+                        theme,
+                        "Photo Output Folder",
+                        "Overrides the default output location for Compress Photos. Leave empty to follow Default Output Folder.",
+                        &mut settings.photo_output_folder,
+                        &photo_fallback,
+                        "Use Default Output Folder",
+                    );
 
-            let video_fallback = settings
-                .default_output_folder
-                .as_ref()
-                .map(|dir| format!("Not set - uses Default Output Folder ({})", dir.display()))
-                .unwrap_or_else(|| {
-                    format!(
-                        "Not set - uses {}",
-                        runtime::default_video_output_root().display()
-                    )
+                    ui.add_space(14.0);
+
+                    let video_fallback = settings
+                        .default_output_folder
+                        .as_ref()
+                        .map(|dir| {
+                            format!("Not set - uses Default Output Folder ({})", dir.display())
+                        })
+                        .unwrap_or_else(|| {
+                            format!(
+                                "Not set - uses {}",
+                                runtime::default_video_output_root().display()
+                            )
+                        });
+                    render_output_folder_field(
+                        ui,
+                        theme,
+                        "Video Output Folder",
+                        "Overrides the default output location for Compress Videos. Files are saved directly into this folder.",
+                        &mut settings.video_output_folder,
+                        &video_fallback,
+                        "Use Default Output Folder",
+                    );
                 });
-            render_output_folder_field(
-                ui,
-                theme,
-                "Video Output Folder",
-                "Overrides the default output location for Compress Videos. Files are saved directly into this folder.",
-                &mut settings.video_output_folder,
-                &video_fallback,
-                "Use Default Output Folder",
-            );
         });
 }
 
@@ -90,14 +101,7 @@ fn render_output_folder_field(
     fallback_text: &str,
     reset_label: &str,
 ) {
-    ui.label(
-        RichText::new(title)
-            .size(13.0)
-            .strong()
-            .color(theme.colors.fg),
-    );
-    ui.add_space(4.0);
-    ui.label(RichText::new(detail).size(11.0).color(theme.colors.fg_dim));
+    hint::title(ui, theme, title, 13.0, Some(detail));
     ui.add_space(8.0);
 
     panel::inset(theme)

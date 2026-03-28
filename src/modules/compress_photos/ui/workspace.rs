@@ -3,7 +3,11 @@ use eframe::egui::{
     vec2,
 };
 
-use crate::{icons, runtime, theme::AppTheme, ui::components::panel};
+use crate::{
+    icons, runtime,
+    theme::AppTheme,
+    ui::components::{hint, panel},
+};
 
 use super::super::models::{CompressionPreset, CompressionState};
 use super::controls::{format_selector, preset_row};
@@ -118,31 +122,15 @@ impl CompressPhotosPage {
                                     .iter()
                                     .filter(|file| matches!(file.state, CompressionState::Ready))
                                     .count();
-                                format!(
-                                    "{ready_count} image(s) ready. Drop more images or folders here anytime."
-                                )
+                                format!("{ready_count} image(s) ready")
                             } else {
-                                "Drop images or folders here to start your workspace".to_owned()
+                                "Drop images or folders here".to_owned()
                             };
                             ui.label(
                                 RichText::new(headline)
                                     .size(if has_files { 13.0 } else { 16.0 })
                                     .strong()
                                     .color(theme.colors.fg),
-                            );
-                            ui.add_space(4.0);
-                            ui.add_sized(
-                                [ui.available_width().min(420.0), 0.0],
-                                egui::Label::new(
-                                    RichText::new(if has_files {
-                                        "You can keep adding files before or during compression."
-                                    } else {
-                                        "Drag and drop JPG, PNG, WebP, or AVIF files, or browse from your device."
-                                    })
-                                    .size(12.0)
-                                    .color(theme.colors.fg_dim),
-                                )
-                                .wrap(),
                             );
                             ui.add_space(10.0);
 
@@ -204,9 +192,7 @@ impl CompressPhotosPage {
                                 };
                                 ui.add_space(6.0);
                                 ui.label(
-                                    RichText::new(output_text.0)
-                                        .size(10.0)
-                                        .color(output_text.1),
+                                    RichText::new(output_text.0).size(10.0).color(output_text.1),
                                 );
                             } else if ui
                                 .add(
@@ -237,11 +223,14 @@ impl CompressPhotosPage {
                 compact(ui);
                 ui.set_min_height((height - 28.0).max(0.0));
 
-                ui.label(
-                    RichText::new("Settings")
-                        .size(14.0)
-                        .strong()
-                        .color(theme.colors.fg),
+                hint::title(
+                    ui,
+                    theme,
+                    "Settings",
+                    14.0,
+                    Some(
+                        "Use presets for quick results. Enable Advanced mode for quality, resize, metadata, and format control.",
+                    ),
                 );
                 ui.add_space(8.0);
 

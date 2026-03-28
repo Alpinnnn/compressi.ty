@@ -25,7 +25,10 @@ use self::{
 
 pub use self::{
     batch::{BatchEvent, BatchHandle, BatchItem, start_video_batch},
-    files::generate_thumbnail,
+    files::{
+        PreviewStreamConfig, build_preview_stream_command, generate_thumbnail,
+        preview_stream_config,
+    },
 };
 
 const VIDEO_EXTENSIONS: [&str; 6] = ["mp4", "mov", "mkv", "webm", "avi", "m4v"];

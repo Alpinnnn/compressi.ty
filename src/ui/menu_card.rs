@@ -58,17 +58,6 @@ pub fn show(ui: &mut Ui, theme: &AppTheme, spec: ModuleSpec, size: Vec2) -> Resp
             .strong()
             .color(theme.colors.fg),
     );
-    child.add_space(4.0);
-    child.add_sized(
-        [content_rect.width(), 36.0],
-        egui::Label::new(
-            RichText::new(spec.description)
-                .size(11.5)
-                .color(theme.colors.fg_dim),
-        )
-        .wrap(),
-    );
-
     response
 }
 

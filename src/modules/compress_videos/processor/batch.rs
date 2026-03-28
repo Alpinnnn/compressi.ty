@@ -52,6 +52,7 @@ pub enum BatchEvent {
 pub struct BatchHandle {
     pub receiver: Receiver<BatchEvent>,
     pub output_dir: PathBuf,
+    pub item_ids: Vec<u64>,
     cancel_flag: Arc<AtomicBool>,
 }
 
@@ -87,6 +88,7 @@ pub fn start_video_batch(
     let cancel_flag = Arc::new(AtomicBool::new(false));
     let thread_cancel = Arc::clone(&cancel_flag);
     let thread_output_dir = output_dir.clone();
+    let item_ids = items.iter().map(|item| item.id).collect();
 
     thread::spawn(move || {
         for item in &items {
@@ -129,6 +131,7 @@ pub fn start_video_batch(
     Ok(BatchHandle {
         receiver,
         output_dir,
+        item_ids,
         cancel_flag,
     })
 }

@@ -1,5 +1,6 @@
 use eframe::egui::{
-    self, Button, CornerRadius, DragValue, RichText, ScrollArea, Slider, Stroke, Ui,
+    self, Align, Button, CornerRadius, DragValue, Layout, RichText, ScrollArea, Slider, Stroke, Ui,
+    vec2,
 };
 
 use crate::{
@@ -12,7 +13,7 @@ use crate::{
         processor,
     },
     theme::AppTheme,
-    ui::components::panel,
+    ui::components::{hint, panel},
 };
 
 use super::{
@@ -31,6 +32,7 @@ impl CompressVideosPage {
         theme: &AppTheme,
         height: f32,
         engine: &VideoEngineController,
+        use_hardware_acceleration: bool,
     ) {
         panel::card(theme)
             .inner_margin(egui::Margin::same(14))
@@ -39,21 +41,17 @@ impl CompressVideosPage {
                 ui.set_min_height((height - 28.0).max(0.0));
 
                 let Some(selected_id) = self.selected_id else {
-                    render_settings_message(
-                        ui,
-                        theme,
-                        "Select a video from the queue to configure its compression settings individually.",
-                    );
+                    render_settings_message(ui, theme, height, "Select a video from the queue.");
                     return;
                 };
 
-                let Some(item) = self.queue.iter().find(|item| item.id == selected_id).cloned()
+                let Some(item) = self
+                    .queue
+                    .iter()
+                    .find(|item| item.id == selected_id)
+                    .cloned()
                 else {
-                    render_settings_message(
-                        ui,
-                        theme,
-                        "Select a video from the queue to configure its compression settings individually.",
-                    );
+                    render_settings_message(ui, theme, height, "Select a video from the queue.");
                     return;
                 };
 
@@ -62,20 +60,36 @@ impl CompressVideosPage {
                     render_settings_message(
                         ui,
                         theme,
-                        "Settings are locked while a video is compressing or after it has finished.",
+                        height,
+                        "Settings are only available while the video is still in the queue.",
                     );
                     return;
                 }
 
                 let Some(metadata) = item.metadata.clone() else {
+                    render_settings_message(
+                        ui,
+                        theme,
+                        height,
+                        "Settings will be available after the video finishes probing.",
+                    );
                     return;
                 };
                 let Some(mut settings) = item.settings.clone() else {
+                    render_settings_message(
+                        ui,
+                        theme,
+                        height,
+                        "Settings will be available after the video finishes probing.",
+                    );
                     return;
                 };
                 let encoders = engine
                     .active_info()
-                    .map(|info| info.encoders.clone())
+                    .map(|info| {
+                        info.encoders
+                            .with_hardware_acceleration(use_hardware_acceleration)
+                    })
                     .unwrap_or_default();
 
                 render_settings_header(ui, theme, &item.file_name, &metadata);
@@ -117,8 +131,10 @@ impl CompressVideosPage {
                         }
                     });
 
-                if let Some(queue_item) =
-                    self.queue.iter_mut().find(|queue_item| queue_item.id == selected_id)
+                if let Some(queue_item) = self
+                    .queue
+                    .iter_mut()
+                    .find(|queue_item| queue_item.id == selected_id)
                 {
                     queue_item.settings = Some(settings);
                 }
@@ -148,15 +164,25 @@ impl CompressVideosPage {
     }
 }
 
-fn render_settings_message(ui: &mut Ui, theme: &AppTheme, message: &str) {
-    ui.label(
-        RichText::new("Settings")
-            .size(14.0)
-            .strong()
-            .color(theme.colors.fg),
+fn render_settings_message(ui: &mut Ui, theme: &AppTheme, height: f32, message: &str) {
+    let body_height = (height - 32.0).max(140.0);
+    ui.allocate_ui_with_layout(
+        vec2(ui.available_width(), body_height),
+        Layout::top_down(Align::Min),
+        |ui| {
+            ui.add_space((body_height - 54.0).max(0.0) * 0.5);
+            ui.vertical_centered(|ui| {
+                ui.label(
+                    RichText::new("Settings")
+                        .size(14.0)
+                        .strong()
+                        .color(theme.colors.fg),
+                );
+                ui.add_space(8.0);
+                ui.label(RichText::new(message).size(12.0).color(theme.colors.fg_dim));
+            });
+        },
     );
-    ui.add_space(8.0);
-    ui.label(RichText::new(message).size(12.0).color(theme.colors.fg_dim));
 }
 
 fn render_settings_header(
@@ -243,11 +269,18 @@ fn render_reduce_size_controls(
     settings: &mut VideoSettings,
 ) {
     let slider_range = processor::size_slider_range(metadata);
-    ui.label(
-        RichText::new("Target size (MB)")
-            .size(12.0)
-            .color(theme.colors.fg_dim),
-    );
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("Target size (MB)")
+                .size(12.0)
+                .color(theme.colors.fg_dim),
+        );
+        hint::badge(
+            ui,
+            theme,
+            "Smaller targets reduce size faster, but quality drops sooner.",
+        );
+    });
     ui.add(
         Slider::new(
             &mut settings.target_size_mb,
@@ -273,18 +306,32 @@ fn render_reduce_size_controls(
 }
 
 fn render_good_quality_controls(ui: &mut Ui, theme: &AppTheme, settings: &mut VideoSettings) {
-    ui.label(
-        RichText::new("Quality")
-            .size(12.0)
-            .color(theme.colors.fg_dim),
-    );
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("Quality")
+                .size(12.0)
+                .color(theme.colors.fg_dim),
+        );
+        hint::badge(
+            ui,
+            theme,
+            "Higher values preserve more detail and usually save less space.",
+        );
+    });
     ui.add(Slider::new(&mut settings.quality, 20..=95).show_value(true));
     ui.add_space(4.0);
-    ui.label(
-        RichText::new("Resolution")
-            .size(12.0)
-            .color(theme.colors.fg_dim),
-    );
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("Resolution")
+                .size(12.0)
+                .color(theme.colors.fg_dim),
+        );
+        hint::badge(
+            ui,
+            theme,
+            "Lower resolution can cut file size when bitrate alone is not enough.",
+        );
+    });
     ui.horizontal_wrapped(|ui| {
         for choice in ResolutionChoice::QUICK {
             if choice_button(ui, theme, choice.label(), settings.resolution == choice).clicked() {

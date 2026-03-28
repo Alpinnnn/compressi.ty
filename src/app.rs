@@ -216,7 +216,13 @@ impl eframe::App for CompressityApp {
         Self::request_repaint_if_needed(ctx, self.video_engine.poll());
         self.apply_pending_launch_import();
         Self::request_repaint_if_needed(ctx, self.compress_photos.poll_background());
-        Self::request_repaint_if_needed(ctx, self.compress_videos.poll_background());
+        Self::request_repaint_if_needed(
+            ctx,
+            self.compress_videos.poll_background(
+                &self.video_engine,
+                self.app_settings.use_hardware_acceleration,
+            ),
+        );
         self.handle_close_request(ctx);
 
         if !self.compress_photos.is_compressing() && !self.compress_videos.is_compressing() {

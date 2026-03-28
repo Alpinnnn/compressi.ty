@@ -56,9 +56,19 @@ pub(super) fn queue_section_header(
     ui.add_space(4.0);
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum QueuePrimaryAction {
+    None,
+    StartCompress,
+    Queued,
+    Cancel,
+}
+
 pub(super) struct QueueRowAction {
     pub(super) clicked: bool,
     pub(super) deleted: bool,
+    pub(super) start_requested: bool,
+    pub(super) cancel_requested: bool,
 }
 
 pub(super) fn video_queue_row(
@@ -67,34 +77,59 @@ pub(super) fn video_queue_row(
     item: &VideoQueueItem,
     selected: bool,
     can_delete: bool,
+    primary_action: QueuePrimaryAction,
     thumbnail: Option<&TextureHandle>,
 ) -> QueueRowAction {
     let mut action = QueueRowAction {
         clicked: false,
         deleted: false,
+        start_requested: false,
+        cancel_requested: false,
     };
     let row_id = Id::new("vq_row").with(item.id);
     let row_width = ui.available_width();
     let row_height = 64.0_f32;
     let (row_rect, _) = ui.allocate_exact_size(vec2(row_width, row_height), Sense::hover());
     let row_response = ui.interact(row_rect, row_id.with("click"), Sense::click());
+    let pointer_inside_row = ui.ctx().input(|input| {
+        input
+            .pointer
+            .hover_pos()
+            .or_else(|| input.pointer.interact_pos())
+            .map(|pointer_position| row_rect.contains(pointer_position))
+            .unwrap_or(false)
+    });
 
-    let button_size = vec2(24.0, 24.0);
-    let button_position = pos2(
-        row_rect.right() - button_size.x - 8.0,
-        row_rect.center().y - button_size.y * 0.5,
+    let button_height = 24.0;
+    let button_y = row_rect.center().y - button_height * 0.5;
+    let delete_rect = Rect::from_min_size(
+        pos2(row_rect.right() - 24.0 - 8.0, button_y),
+        vec2(24.0, button_height),
     );
-    let button_rect = Rect::from_min_size(button_position, button_size);
-    let button_response = if can_delete {
-        Some(ui.interact(button_rect, row_id.with("trash"), Sense::click()))
+    let delete_response = if can_delete {
+        Some(ui.interact(delete_rect, row_id.with("trash"), Sense::click()))
     } else {
         None
     };
-    let row_hovered = row_response.hovered()
-        || button_response
-            .as_ref()
-            .map(|response| response.hovered())
-            .unwrap_or(false);
+    let show_delete_button = can_delete && pointer_inside_row;
+    let show_primary_button = should_show_primary_button(primary_action, pointer_inside_row);
+
+    let primary_rect = primary_button_rect(
+        primary_action,
+        row_rect,
+        show_primary_button,
+        show_delete_button,
+    );
+    let primary_response = primary_rect.map(|rect| {
+        ui.interact(
+            rect,
+            row_id.with("primary"),
+            match primary_action {
+                QueuePrimaryAction::StartCompress | QueuePrimaryAction::Cancel => Sense::click(),
+                QueuePrimaryAction::Queued | QueuePrimaryAction::None => Sense::hover(),
+            },
+        )
+    });
 
     let fill = if selected {
         theme.mix(theme.colors.bg_raised, theme.colors.accent, 0.10)
@@ -107,7 +142,7 @@ pub(super) fn video_queue_row(
         CornerRadius::ZERO,
         Stroke::new(
             1.0,
-            if row_hovered || selected {
+            if pointer_inside_row || selected {
                 theme.colors.border_focus
             } else {
                 theme.colors.border
@@ -148,8 +183,10 @@ pub(super) fn video_queue_row(
     }
 
     let text_left = row_rect.left() + 10.0 + thumbnail_size + 8.0;
-    let text_right = if can_delete && row_hovered {
-        button_rect.left() - 4.0
+    let text_right = if let Some(rect) = primary_rect {
+        rect.left() - 6.0
+    } else if show_delete_button {
+        delete_rect.left() - 4.0
     } else {
         row_rect.right() - 10.0
     };
@@ -259,8 +296,21 @@ pub(super) fn video_queue_row(
         }
     }
 
-    if let Some(button_response) = &button_response {
-        if row_hovered {
+    if let Some(response) = &primary_response {
+        if let Some(rect) = primary_rect {
+            paint_primary_button(ui, theme, rect, response, primary_action);
+            if response.clicked() {
+                match primary_action {
+                    QueuePrimaryAction::StartCompress => action.start_requested = true,
+                    QueuePrimaryAction::Cancel => action.cancel_requested = true,
+                    QueuePrimaryAction::None | QueuePrimaryAction::Queued => {}
+                }
+            }
+        }
+    }
+
+    if let Some(button_response) = &delete_response {
+        if show_delete_button {
             let animation = ui
                 .ctx()
                 .animate_bool(button_response.id, button_response.hovered());
@@ -270,9 +320,9 @@ pub(super) fn video_queue_row(
                 0.10 + animation * 0.15,
             );
             ui.painter()
-                .rect_filled(button_rect, CornerRadius::ZERO, button_fill);
+                .rect_filled(delete_rect, CornerRadius::ZERO, button_fill);
             ui.painter().rect_stroke(
-                button_rect,
+                delete_rect,
                 CornerRadius::ZERO,
                 Stroke::new(
                     1.0,
@@ -281,7 +331,7 @@ pub(super) fn video_queue_row(
                 StrokeKind::Middle,
             );
             ui.painter().text(
-                button_rect.center(),
+                delete_rect.center(),
                 egui::Align2::CENTER_CENTER,
                 icons::TRASH,
                 icons::font_id(13.0),
@@ -293,11 +343,142 @@ pub(super) fn video_queue_row(
         }
     }
 
-    if row_response.clicked() && !action.deleted {
+    if row_response.clicked()
+        && !action.deleted
+        && !action.start_requested
+        && !action.cancel_requested
+    {
         action.clicked = true;
     }
 
     action
+}
+
+fn primary_button_rect(
+    action: QueuePrimaryAction,
+    row_rect: Rect,
+    show_button: bool,
+    show_delete_button: bool,
+) -> Option<Rect> {
+    if !show_button {
+        return None;
+    }
+
+    let width = match action {
+        QueuePrimaryAction::None => return None,
+        QueuePrimaryAction::StartCompress => 24.0,
+        QueuePrimaryAction::Queued => 72.0,
+        QueuePrimaryAction::Cancel => 24.0,
+    };
+
+    let right = if show_delete_button {
+        row_rect.right() - 24.0 - 8.0 - 6.0
+    } else {
+        row_rect.right() - 8.0
+    };
+
+    Some(Rect::from_min_size(
+        pos2(right - width, row_rect.center().y - 12.0),
+        vec2(width, 24.0),
+    ))
+}
+
+fn should_show_primary_button(action: QueuePrimaryAction, row_hovered: bool) -> bool {
+    match action {
+        QueuePrimaryAction::None => false,
+        QueuePrimaryAction::Queued => true,
+        QueuePrimaryAction::StartCompress | QueuePrimaryAction::Cancel => row_hovered,
+    }
+}
+
+fn paint_primary_button(
+    ui: &mut Ui,
+    theme: &AppTheme,
+    rect: Rect,
+    response: &egui::Response,
+    action: QueuePrimaryAction,
+) {
+    let t = ui.ctx().animate_bool(response.id, response.hovered());
+    let (fill, stroke, icon, label, icon_color, text_color) = match action {
+        QueuePrimaryAction::StartCompress => (
+            theme.mix(theme.colors.accent, Color32::WHITE, t * 0.06),
+            Stroke::NONE,
+            Some(icons::PLAY),
+            None,
+            Color32::BLACK,
+            Color32::BLACK,
+        ),
+        QueuePrimaryAction::Queued => (
+            theme.mix(
+                theme.colors.bg_raised,
+                theme.colors.surface_hover,
+                0.20 + t * 0.10,
+            ),
+            Stroke::new(1.0, theme.colors.border),
+            None,
+            Some("Queued"),
+            theme.colors.fg_dim,
+            theme.colors.fg_dim,
+        ),
+        QueuePrimaryAction::Cancel => (
+            theme.mix(theme.colors.surface, theme.colors.caution, 0.14 + t * 0.10),
+            Stroke::new(
+                1.0,
+                theme.mix(theme.colors.border, theme.colors.caution, 0.28),
+            ),
+            Some(icons::CLOSE),
+            None,
+            theme.colors.fg,
+            theme.colors.fg,
+        ),
+        QueuePrimaryAction::None => return,
+    };
+
+    ui.painter().rect_filled(rect, CornerRadius::ZERO, fill);
+    if stroke != Stroke::NONE {
+        ui.painter()
+            .rect_stroke(rect, CornerRadius::ZERO, stroke, StrokeKind::Middle);
+    }
+
+    match (icon, label) {
+        (Some(icon), Some(label)) => {
+            let mut text_x = rect.left() + 8.0;
+            ui.painter().text(
+                pos2(text_x + 5.0, rect.center().y),
+                egui::Align2::CENTER_CENTER,
+                icon,
+                icons::font_id(11.0),
+                icon_color,
+            );
+            text_x += 14.0;
+            ui.painter().text(
+                pos2(text_x, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                label,
+                egui::FontId::proportional(10.5),
+                text_color,
+            );
+        }
+        (Some(icon), None) => {
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                icon,
+                icons::font_id(11.0),
+                icon_color,
+            );
+        }
+        (None, Some(label)) => {
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                label,
+                egui::FontId::proportional(10.5),
+                text_color,
+            );
+        }
+        (None, None) => {}
+    }
 }
 
 pub(super) fn format_bytes(bytes: u64) -> String {

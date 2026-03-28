@@ -85,13 +85,30 @@ impl CompressVideosPage {
                     let usable_width = (workspace_width - gutter * 2.0).max(0.0);
                     let queue_width = usable_width * 0.28;
                     let center_width = usable_width * 0.38;
+                    let queue_actions_height = 108.0;
+                    let queue_height = (workspace_height - queue_actions_height - 12.0).max(0.0);
+                    let media_panel_height = ((workspace_height - 12.0) * 0.5).max(0.0);
 
                     ui.allocate_ui_with_layout(
                         vec2(queue_width, workspace_height),
                         Layout::top_down(Align::Min),
                         |ui| {
                             flush(ui);
-                            self.render_queue(ui, theme, workspace_height);
+                            self.render_queue(
+                                ui,
+                                theme,
+                                queue_height,
+                                engine,
+                                app_settings.use_hardware_acceleration,
+                            );
+                            ui.add_space(12.0);
+                            self.render_actions(
+                                ui,
+                                theme,
+                                queue_actions_height,
+                                engine,
+                                app_settings.use_hardware_acceleration,
+                            );
                         },
                     );
                     ui.add_space(gutter);
@@ -100,14 +117,9 @@ impl CompressVideosPage {
                         Layout::top_down(Align::Min),
                         |ui| {
                             flush(ui);
-                            self.render_drop_zone(ui, ctx, theme, workspace_height * 0.45, engine);
+                            self.render_drop_zone(ui, ctx, theme, media_panel_height, engine);
                             ui.add_space(12.0);
-                            self.render_actions(
-                                ui,
-                                theme,
-                                (workspace_height * 0.55 - 12.0).max(0.0),
-                                engine,
-                            );
+                            self.render_preview_panel(ui, ctx, theme, media_panel_height, engine);
                         },
                     );
                     ui.add_space(gutter);
@@ -117,30 +129,146 @@ impl CompressVideosPage {
                         Layout::top_down(Align::Min),
                         |ui| {
                             flush(ui);
-                            self.render_settings_panel(ui, theme, workspace_height, engine);
+                            self.render_settings_panel(
+                                ui,
+                                theme,
+                                workspace_height,
+                                engine,
+                                app_settings.use_hardware_acceleration,
+                            );
                         },
                     );
                 },
             );
         } else {
             let drop_height = if has_files {
-                workspace_height * 0.22
+                (workspace_height * 0.22)
+                    .max(150.0)
+                    .min(((workspace_height - 24.0) * 0.5).max(0.0))
             } else {
                 workspace_height * 0.45
             };
             self.render_drop_zone(&mut content_ui, ctx, theme, drop_height.max(0.0), engine);
             if has_files {
                 content_ui.add_space(12.0);
-                let remaining_height = (workspace_height - drop_height - 12.0).max(0.0);
-                let queue_height = remaining_height * 0.35;
-                let settings_height = remaining_height * 0.40;
-                let actions_height = remaining_height * 0.25 - 24.0;
-                self.render_queue(&mut content_ui, theme, queue_height);
+                let preview_height = drop_height;
+                self.render_preview_panel(&mut content_ui, ctx, theme, preview_height, engine);
                 content_ui.add_space(12.0);
-                self.render_settings_panel(&mut content_ui, theme, settings_height, engine);
+                let remaining_height =
+                    (workspace_height - drop_height - preview_height - 24.0).max(0.0);
+                let actions_height = ((remaining_height * 0.20).clamp(60.0, 96.0))
+                    .min((remaining_height - 12.0).max(0.0));
+                let queue_and_settings_height = (remaining_height - actions_height - 12.0).max(0.0);
+                let queue_height = queue_and_settings_height * 0.38;
+                let settings_height = queue_and_settings_height - queue_height;
+                self.render_queue(
+                    &mut content_ui,
+                    theme,
+                    queue_height,
+                    engine,
+                    app_settings.use_hardware_acceleration,
+                );
                 content_ui.add_space(12.0);
-                self.render_actions(&mut content_ui, theme, actions_height.max(0.0), engine);
+                self.render_actions(
+                    &mut content_ui,
+                    theme,
+                    actions_height.max(0.0),
+                    engine,
+                    app_settings.use_hardware_acceleration,
+                );
+                content_ui.add_space(12.0);
+                self.render_settings_panel(
+                    &mut content_ui,
+                    theme,
+                    settings_height.max(0.0),
+                    engine,
+                    app_settings.use_hardware_acceleration,
+                );
             }
         }
+
+        self.render_cancel_all_confirm(ctx, theme);
+    }
+
+    fn render_cancel_all_confirm(&mut self, ctx: &egui::Context, theme: &AppTheme) {
+        if !self.show_cancel_all_confirm {
+            return;
+        }
+
+        egui::Area::new(egui::Id::new("video_cancel_all_overlay"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::LEFT_TOP, vec2(0.0, 0.0))
+            .interactable(false)
+            .show(ctx, |ui| {
+                let screen = ctx.screen_rect();
+                let overlay_fill = theme.colors.bg_base.linear_multiply(0.82);
+                ui.painter()
+                    .rect_filled(screen, egui::CornerRadius::ZERO, overlay_fill);
+            });
+
+        egui::Window::new("Cancel all compression")
+            .id(egui::Id::new("video_cancel_all_window"))
+            .resizable(false)
+            .collapsible(false)
+            .title_bar(false)
+            .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .order(egui::Order::Foreground)
+            .frame(
+                egui::Frame::new()
+                    .fill(theme.colors.surface)
+                    .stroke(egui::Stroke::new(1.0, theme.colors.border))
+                    .corner_radius(egui::CornerRadius::ZERO)
+                    .inner_margin(egui::Margin::same(20)),
+            )
+            .show(ctx, |ui| {
+                ui.set_width(320.0);
+                ui.label(
+                    egui::RichText::new("Cancel All")
+                        .size(16.0)
+                        .strong()
+                        .color(theme.colors.fg),
+                );
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new("Are you sure?")
+                        .size(12.5)
+                        .color(theme.colors.fg_dim),
+                );
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Yes, Cancel All")
+                                    .size(12.0)
+                                    .strong()
+                                    .color(theme.colors.fg),
+                            )
+                            .fill(theme.colors.negative)
+                            .stroke(egui::Stroke::new(1.0, theme.colors.negative))
+                            .corner_radius(egui::CornerRadius::ZERO),
+                        )
+                        .clicked()
+                    {
+                        self.confirm_cancel_all();
+                    }
+
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Keep Running")
+                                    .size(12.0)
+                                    .color(theme.colors.fg),
+                            )
+                            .fill(theme.colors.bg_raised)
+                            .stroke(egui::Stroke::new(1.0, theme.colors.border))
+                            .corner_radius(egui::CornerRadius::ZERO),
+                        )
+                        .clicked()
+                    {
+                        self.dismiss_cancel_all();
+                    }
+                });
+            });
     }
 }

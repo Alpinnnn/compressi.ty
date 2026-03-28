@@ -1,12 +1,14 @@
 use eframe::egui::{self, Color32, ColorImage, ScrollArea, TextureOptions, Ui};
 
 use crate::{
-    modules::compress_videos::models::VideoCompressionState, theme::AppTheme, ui::components::panel,
+    modules::compress_videos::{engine::VideoEngineController, models::VideoCompressionState},
+    theme::AppTheme,
+    ui::components::panel,
 };
 
 use super::{
     BannerMessage, BannerTone, CompressVideosPage, compact, flush, is_video_settings_editable,
-    widgets::{queue_section_header, video_queue_row},
+    widgets::{QueuePrimaryAction, queue_section_header, video_queue_row},
 };
 
 struct QueueCategory {
@@ -16,7 +18,14 @@ struct QueueCategory {
 }
 
 impl CompressVideosPage {
-    pub(super) fn render_queue(&mut self, ui: &mut Ui, theme: &AppTheme, height: f32) {
+    pub(super) fn render_queue(
+        &mut self,
+        ui: &mut Ui,
+        theme: &AppTheme,
+        height: f32,
+        engine: &VideoEngineController,
+        use_hardware_acceleration: bool,
+    ) {
         if self.queue.is_empty() {
             return;
         }
@@ -40,8 +49,9 @@ impl CompressVideosPage {
 
         let mut clicked_id = None;
         let mut delete_id = None;
+        let mut start_id = None;
+        let mut cancel_current_video = false;
         let mut locked_settings_click = false;
-        let is_compressing = self.active_batch.is_some();
         let categories = queue_categories(theme);
 
         panel::card(theme)
@@ -82,16 +92,35 @@ impl CompressVideosPage {
                                 let settings_editable = is_video_settings_editable(&item.state);
                                 let selected =
                                     settings_editable && self.selected_id == Some(item.id);
-                                let can_delete = !is_compressing
+                                let is_pending = self.is_video_pending_compression(item.id);
+                                let can_delete = !self.has_pending_compression()
                                     && matches!(
                                         item.state,
                                         VideoCompressionState::Ready
                                             | VideoCompressionState::Failed(_)
                                             | VideoCompressionState::Cancelled
                                     );
+                                let primary_action = match &item.state {
+                                    VideoCompressionState::Ready if is_pending => {
+                                        QueuePrimaryAction::Queued
+                                    }
+                                    VideoCompressionState::Ready => {
+                                        QueuePrimaryAction::StartCompress
+                                    }
+                                    VideoCompressionState::Compressing(_) => {
+                                        QueuePrimaryAction::Cancel
+                                    }
+                                    _ => QueuePrimaryAction::None,
+                                };
                                 let thumbnail = self.thumbnail_textures.get(&item.id);
                                 let action = video_queue_row(
-                                    ui, theme, item, selected, can_delete, thumbnail,
+                                    ui,
+                                    theme,
+                                    item,
+                                    selected,
+                                    can_delete,
+                                    primary_action,
+                                    thumbnail,
                                 );
 
                                 if action.clicked && settings_editable {
@@ -102,6 +131,14 @@ impl CompressVideosPage {
 
                                 if action.deleted {
                                     delete_id = Some(item.id);
+                                }
+
+                                if action.start_requested {
+                                    start_id = Some(item.id);
+                                }
+
+                                if action.cancel_requested {
+                                    cancel_current_video = true;
                                 }
                             }
                             ui.add_space(8.0);
@@ -114,7 +151,16 @@ impl CompressVideosPage {
             self.thumbnail_textures.remove(&id);
             if self.selected_id == Some(id) {
                 self.selected_id = None;
+                self.reset_preview_state();
             }
+        }
+
+        if let Some(id) = start_id {
+            self.start_single_compression(id, engine, use_hardware_acceleration);
+        }
+
+        if cancel_current_video {
+            self.cancel_active_video();
         }
 
         if let Some(id) = clicked_id {
@@ -123,18 +169,23 @@ impl CompressVideosPage {
             } else {
                 Some(id)
             };
+            if self.selected_id.is_none() {
+                self.reset_preview_state();
+            }
         }
 
         if locked_settings_click {
+            self.selected_id = None;
+            self.reset_preview_state();
             self.banner = Some(BannerMessage {
                 tone: BannerTone::Info,
-                text: "Settings are only available for videos that are still editable.".into(),
+                text: "Settings are only available for videos that are still in the queue.".into(),
             });
         }
     }
 }
 
-fn queue_categories(theme: &AppTheme) -> [QueueCategory; 4] {
+fn queue_categories(theme: &AppTheme) -> [QueueCategory; 5] {
     [
         QueueCategory {
             title: "Probing",
@@ -156,6 +207,11 @@ fn queue_categories(theme: &AppTheme) -> [QueueCategory; 4] {
             tint: theme.colors.positive,
             matches_state: is_finished,
         },
+        QueueCategory {
+            title: "Cancelled",
+            tint: theme.colors.caution,
+            matches_state: is_cancelled,
+        },
     ]
 }
 
@@ -174,8 +230,10 @@ fn is_processing(state: &VideoCompressionState) -> bool {
 fn is_finished(state: &VideoCompressionState) -> bool {
     matches!(
         state,
-        VideoCompressionState::Completed(_)
-            | VideoCompressionState::Failed(_)
-            | VideoCompressionState::Cancelled
+        VideoCompressionState::Completed(_) | VideoCompressionState::Failed(_)
     )
+}
+
+fn is_cancelled(state: &VideoCompressionState) -> bool {
+    matches!(state, VideoCompressionState::Cancelled)
 }

@@ -1,5 +1,6 @@
 mod engine_section;
 mod output_section;
+mod processing_section;
 
 use eframe::egui::{
     self, Align, Button, CornerRadius, Layout, RichText, ScrollArea, Stroke, Ui, vec2,
@@ -10,10 +11,13 @@ use crate::{
     modules::{ModuleKind, compress_videos::engine::VideoEngineController},
     settings::AppSettings,
     theme::AppTheme,
-    ui::components::panel,
+    ui::components::{hint, panel},
 };
 
-use self::{engine_section::render_engine_settings, output_section::render_output_settings};
+use self::{
+    engine_section::render_engine_settings, output_section::render_output_settings,
+    processing_section::render_processing_settings,
+};
 
 pub fn show(
     ui: &mut Ui,
@@ -52,6 +56,8 @@ pub fn show(
                     |ui| {
                         render_output_settings(ui, theme, app_settings);
                         ui.add_space(16.0);
+                        render_processing_settings(ui, theme, app_settings);
+                        ui.add_space(16.0);
                         render_engine_settings(ui, theme, video_engine);
                     },
                 );
@@ -84,18 +90,12 @@ fn render_header(ui: &mut Ui, theme: &AppTheme, active_module: &mut Option<Modul
 
                 ui.add_space(12.0);
                 ui.vertical(|ui| {
-                    ui.label(
-                        RichText::new("Settings")
-                            .size(22.0)
-                            .strong()
-                            .color(theme.colors.fg),
-                    );
-                    ui.label(
-                        RichText::new(
-                            "Configure global application preferences and bundled video tools.",
-                        )
-                        .size(12.0)
-                        .color(theme.colors.fg_dim),
+                    hint::title(
+                        ui,
+                        theme,
+                        "Settings",
+                        22.0,
+                        Some("Configure global defaults and the bundled video engine."),
                     );
                 });
             });

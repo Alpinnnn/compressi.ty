@@ -64,11 +64,9 @@ impl CompressVideosPage {
                                             matches!(item.state, VideoCompressionState::Ready)
                                         })
                                         .count();
-                                    format!(
-                                        "{ready_count} video(s) ready. Drop more videos or folders here."
-                                    )
+                                    format!("{ready_count} video(s) ready")
                                 } else {
-                                    "Drop videos or folders here to start your workspace".to_owned()
+                                    "Drop videos or folders here".to_owned()
                                 })
                                 .size(if has_files { 13.0 } else { 16.0 })
                                 .strong()
@@ -131,14 +129,13 @@ impl CompressVideosPage {
         theme: &AppTheme,
         height: f32,
         engine: &VideoEngineController,
+        use_hardware_acceleration: bool,
     ) {
         let accent = theme.colors.accent;
-        let can_start = !self.queue.is_empty()
-            && self.active_batch.is_none()
-            && self
-                .queue
-                .iter()
-                .any(|item| matches!(item.state, VideoCompressionState::Ready));
+        let has_ready_videos = self
+            .queue
+            .iter()
+            .any(|item| matches!(item.state, VideoCompressionState::Ready));
 
         panel::card(theme)
             .inner_margin(egui::Margin::same(14))
@@ -148,7 +145,7 @@ impl CompressVideosPage {
 
                 if ui
                     .add_enabled(
-                        can_start,
+                        has_ready_videos,
                         Button::new(
                             RichText::new(format!("{} Compress All", icons::PLAY))
                                 .size(13.0)
@@ -162,31 +159,33 @@ impl CompressVideosPage {
                     )
                     .clicked()
                 {
-                    self.start_batch_compression(engine);
+                    self.start_batch_compression(engine, use_hardware_acceleration);
                 }
 
                 ui.horizontal(|ui| {
                     if ui
                         .add_enabled(
-                            self.active_batch.is_some(),
-                            Button::new(RichText::new("Cancel").size(12.0).color(theme.colors.fg))
-                                .fill(theme.mix(theme.colors.surface, theme.colors.caution, 0.1))
-                                .stroke(Stroke::new(
-                                    1.0,
-                                    theme.mix(theme.colors.border, theme.colors.caution, 0.24),
-                                ))
-                                .corner_radius(CornerRadius::ZERO),
+                            self.has_pending_compression(),
+                            Button::new(
+                                RichText::new("Cancel All")
+                                    .size(12.0)
+                                    .color(theme.colors.fg),
+                            )
+                            .fill(theme.mix(theme.colors.surface, theme.colors.caution, 0.1))
+                            .stroke(Stroke::new(
+                                1.0,
+                                theme.mix(theme.colors.border, theme.colors.caution, 0.24),
+                            ))
+                            .corner_radius(CornerRadius::ZERO),
                         )
                         .clicked()
                     {
-                        if let Some(batch) = &self.active_batch {
-                            batch.cancel();
-                        }
+                        self.request_cancel_all();
                     }
 
                     if ui
                         .add_enabled(
-                            self.active_batch.is_none() && !self.queue.is_empty(),
+                            !self.has_pending_compression() && !self.queue.is_empty(),
                             Button::new(
                                 RichText::new("Clear All").size(12.0).color(theme.colors.fg),
                             )
@@ -202,10 +201,11 @@ impl CompressVideosPage {
                         self.queue.clear();
                         self.selected_id = None;
                         self.banner = None;
+                        self.reset_preview_state();
                     }
                 });
 
-                if self.active_batch.is_some() {
+                if self.has_pending_compression() {
                     ui.horizontal(|ui| {
                         ui.add(egui::Spinner::new().size(12.0));
                         ui.label(

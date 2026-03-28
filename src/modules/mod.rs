@@ -27,7 +27,6 @@ pub enum IconKind {
 pub struct ModuleSpec {
     pub icon: IconKind,
     pub title: &'static str,
-    pub description: &'static str,
     pub detail: &'static str,
     pub accent: Color32,
 }
@@ -38,42 +37,36 @@ impl ModuleKind {
             Self::CompressFiles => ModuleSpec {
                 icon: IconKind::Files,
                 title: "Compress Files",
-                description: "Optimize mixed files with quick presets and local-only processing.",
                 detail: "Queue individual files, preview output sizes, and fine tune compression without sending anything to the cloud.",
                 accent: Color32::from_rgb(208, 208, 204),
             },
             Self::CompressFolder => ModuleSpec {
                 icon: IconKind::Folder,
                 title: "Compress Folder",
-                description: "Shrink entire directories while keeping structure clean and intact.",
                 detail: "Bundle large folders into lighter, easier-to-share packages with room for custom rules and exclusions.",
                 accent: Color32::from_rgb(196, 196, 192),
             },
             Self::CompressPhotos => ModuleSpec {
                 icon: IconKind::Photo,
                 title: "Compress Photos",
-                description: "Compress images with adjustable quality and modern compression algorithms.",
                 detail: "Reduce photo size with presets, advanced controls, background batch jobs, and modern output formats.",
                 accent: Color32::from_rgb(228, 228, 224),
             },
             Self::CompressVideos => ModuleSpec {
                 icon: IconKind::Videos,
                 title: "Compress Videos",
-                description: "Trim file size for clips and recordings without losing clarity.",
                 detail: "Prepare high-resolution footage for sharing, archiving, or faster local playback with codec-aware presets.",
                 accent: Color32::from_rgb(184, 184, 180),
             },
             Self::ArchiveExtract => ModuleSpec {
                 icon: IconKind::Archive,
                 title: "Archive / Extract",
-                description: "Create archives or unpack them in one focused workspace.",
                 detail: "Handle compressed packages, archive formats, and extraction tasks from a single module built for speed.",
                 accent: Color32::from_rgb(168, 168, 164),
             },
             Self::Settings => ModuleSpec {
                 icon: IconKind::Settings,
                 title: "Settings",
-                description: "Adjust defaults, themes, destinations, and performance behavior.",
                 detail: "Manage the app experience, automation preferences, and output destinations from a clean control hub.",
                 accent: Color32::from_rgb(152, 152, 148),
             },

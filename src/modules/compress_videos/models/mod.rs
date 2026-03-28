@@ -1,5 +1,6 @@
 mod engine;
 mod media;
+mod preview;
 mod workflow;
 
 pub use self::{
@@ -12,4 +13,8 @@ pub use self::{
         VideoCompressionState, VideoMetadata, VideoQueueItem, VideoThumbnail,
     },
     workflow::{CodecChoice, CompressionMode, ResolutionChoice, SizeSliderRange, VideoSettings},
+};
+
+pub(in crate::modules::compress_videos) use self::preview::{
+    PreviewClickFeedback, PreviewClickFeedbackIcon, PreviewFrame, VideoPreviewState,
 };

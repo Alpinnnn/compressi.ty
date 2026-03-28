@@ -31,7 +31,7 @@ fn main() -> eframe::Result<()> {
         .with_title("Compressi.ty")
         .with_maximized(true)
         .with_min_inner_size([820.0, 560.0])
-        .with_resizable(true);
+        .with_resizable(false);
 
     if let Some(icon) = branding::load_window_icon() {
         viewport = viewport.with_icon(icon);

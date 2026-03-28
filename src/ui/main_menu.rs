@@ -104,7 +104,7 @@ fn render_grid(ui: &mut Ui, theme: &AppTheme, active_module: &mut Option<ModuleK
     let gap = 10.0;
     let card_w =
         ((avail - gap * (cols.saturating_sub(1) as f32)) / cols as f32).clamp(200.0, 280.0);
-    let card_h = 148.0;
+    let card_h = 116.0;
 
     Grid::new("main_grid")
         .num_columns(cols)
@@ -169,12 +169,6 @@ fn render_about_window(ctx: &egui::Context, theme: &AppTheme, show_about: &mut b
             ui.label(
                 RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
                     .size(12.0)
-                    .color(theme.colors.fg_dim),
-            );
-            ui.add_space(12.0);
-            ui.label(
-                RichText::new("The only compression tool you'll ever need!")
-                    .size(13.0)
                     .color(theme.colors.fg_dim),
             );
             ui.add_space(14.0);

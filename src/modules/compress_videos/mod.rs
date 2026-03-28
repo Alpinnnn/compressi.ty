@@ -1,4 +1,6 @@
 mod logic;
+mod preview_logic;
+mod preview_runtime;
 mod ui;
 
 pub mod engine;
@@ -10,9 +12,13 @@ use std::{collections::HashMap, path::PathBuf, sync::mpsc};
 use eframe::egui::TextureHandle;
 
 use crate::modules::compress_videos::{
-    models::{EncoderAvailability, VideoMetadata, VideoQueueItem, VideoThumbnail},
+    models::{
+        EncoderAvailability, VideoMetadata, VideoPreviewState, VideoQueueItem, VideoThumbnail,
+    },
     processor::BatchHandle,
 };
+
+use self::preview_runtime::RunningPreviewStream;
 
 /// Video compression workspace state and queue orchestration.
 pub struct CompressVideosPage {
@@ -21,6 +27,7 @@ pub struct CompressVideosPage {
     selected_id: Option<u64>,
 
     active_batch: Option<BatchHandle>,
+    pending_compression_ids: Vec<u64>,
     pending_probes: Vec<PendingProbe>,
 
     output_dir: Option<PathBuf>,
@@ -28,9 +35,14 @@ pub struct CompressVideosPage {
     last_output_dir: Option<PathBuf>,
 
     banner: Option<BannerMessage>,
+    show_cancel_all_confirm: bool,
 
     /// Cached GPU textures keyed by queue item id.
     thumbnail_textures: HashMap<u64, TextureHandle>,
+    preview_state: VideoPreviewState,
+    preview_texture: Option<TextureHandle>,
+    preview_texture_dirty: bool,
+    running_preview_stream: Option<RunningPreviewStream>,
 }
 
 struct PendingProbe {

@@ -56,11 +56,16 @@ impl CompressPhotosPage {
                             .filter(|(_, file)| {
                                 matches!(
                                     file.state,
-                                    CompressionState::Completed(_)
-                                        | CompressionState::Failed(_)
-                                        | CompressionState::Cancelled
+                                    CompressionState::Completed(_) | CompressionState::Failed(_)
                                 )
                             })
+                            .map(|(index, _)| index)
+                            .collect();
+                        let cancelled: Vec<usize> = self
+                            .files
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, file)| matches!(file.state, CompressionState::Cancelled))
                             .map(|(index, _)| index)
                             .collect();
 
@@ -122,6 +127,29 @@ impl CompressPhotosPage {
                                 theme.colors.positive,
                             );
                             for &index in &finished {
+                                let action = queue_row_interactive(
+                                    ui,
+                                    theme,
+                                    &self.files[index],
+                                    false,
+                                    false,
+                                );
+                                if action.clicked {
+                                    clicked_id = Some(self.files[index].asset.id);
+                                }
+                            }
+                            ui.add_space(8.0);
+                        }
+
+                        if !cancelled.is_empty() {
+                            queue_section_header(
+                                ui,
+                                theme,
+                                "Cancelled",
+                                cancelled.len(),
+                                theme.colors.caution,
+                            );
+                            for &index in &cancelled {
                                 let action = queue_row_interactive(
                                     ui,
                                     theme,

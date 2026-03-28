@@ -4,7 +4,7 @@ use crate::{
     modules::compress_videos::{
         engine::VideoEngineController,
         models::{
-            ProcessingProgress, VideoCompressionState, VideoQueueItem, VideoSettings,
+            ProcessingProgress, VideoCompressionState, VideoPreviewState, VideoQueueItem,
             VideoThumbnail,
         },
         processor::{self, BatchEvent, BatchItem},
@@ -12,7 +12,7 @@ use crate::{
     runtime,
 };
 
-use super::{BannerMessage, BannerTone, CompressVideosPage, PendingProbe, ProbeResult};
+use super::{BannerMessage, BannerTone, CompressVideosPage};
 
 impl Default for CompressVideosPage {
     fn default() -> Self {
@@ -21,20 +21,26 @@ impl Default for CompressVideosPage {
             next_id: 0,
             selected_id: None,
             active_batch: None,
+            pending_compression_ids: Vec::new(),
             pending_probes: Vec::new(),
             output_dir: None,
             output_dir_user_set: false,
             last_output_dir: None,
             banner: None,
+            show_cancel_all_confirm: false,
             thumbnail_textures: HashMap::new(),
+            preview_state: VideoPreviewState::default(),
+            preview_texture: None,
+            preview_texture_dirty: false,
+            running_preview_stream: None,
         }
     }
 }
 
 impl CompressVideosPage {
-    /// Returns true while a batch compression job is currently active.
+    /// Returns true while a video job is active or queued for automatic processing.
     pub fn is_compressing(&self) -> bool {
-        self.active_batch.is_some()
+        self.active_batch.is_some() || !self.pending_compression_ids.is_empty()
     }
 
     /// Queues files that were opened externally through the OS shell.
@@ -46,23 +52,51 @@ impl CompressVideosPage {
         self.add_paths(paths, engine);
     }
 
-    /// Cancels the active compression batch if one is running.
-    pub fn cancel_compression(&self) {
+    /// Cancels the active compression job and any queued follow-up jobs.
+    pub fn cancel_compression(&mut self) {
+        let pending_ids = std::mem::take(&mut self.pending_compression_ids);
+        for id in pending_ids {
+            if let Some(item) = self.queue.iter_mut().find(|item| item.id == id)
+                && matches!(item.state, VideoCompressionState::Ready)
+            {
+                item.state = VideoCompressionState::Cancelled;
+            }
+        }
+
         if let Some(batch) = &self.active_batch {
             batch.cancel();
         }
     }
 
-    /// Polls background probes and batch jobs, then returns a repaint interval while work is active.
-    pub fn poll_background(&mut self) -> Option<Duration> {
+    /// Cancels only the currently active video without touching queued follow-up jobs.
+    pub fn cancel_active_video(&self) {
+        if let Some(batch) = &self.active_batch {
+            batch.cancel();
+        }
+    }
+
+    /// Polls background probes and jobs, then requests repaints while work continues.
+    pub fn poll_background(
+        &mut self,
+        engine: &VideoEngineController,
+        use_hardware_acceleration: bool,
+    ) -> Option<Duration> {
         self.poll_probes();
         self.poll_batch();
+        self.poll_preview_stream();
+        self.start_next_scheduled_video(engine, use_hardware_acceleration);
 
-        let busy = !self.pending_probes.is_empty() || self.active_batch.is_some();
-        if busy {
-            Some(Duration::from_millis(50))
+        if self.running_preview_stream.is_some() {
+            Some(Duration::from_millis(16))
         } else {
-            None
+            let busy = !self.pending_probes.is_empty()
+                || self.active_batch.is_some()
+                || !self.pending_compression_ids.is_empty();
+            if busy {
+                Some(Duration::from_millis(50))
+            } else {
+                None
+            }
         }
     }
 
@@ -79,7 +113,9 @@ impl CompressVideosPage {
             match probe_result.metadata {
                 Ok(metadata) => {
                     let range = processor::size_slider_range(&metadata);
-                    let settings = VideoSettings::new(&metadata, &encoders, range);
+                    let settings = crate::modules::compress_videos::models::VideoSettings::new(
+                        &metadata, &encoders, range,
+                    );
                     if let Some(item) = self.queue.iter_mut().find(|item| item.id == id) {
                         item.file_name = metadata.file_name.clone();
                         item.metadata = Some(metadata);
@@ -99,7 +135,10 @@ impl CompressVideosPage {
 
     fn poll_batch(&mut self) {
         let mut finished = None;
+        let mut batch_item_ids = Vec::new();
+        let mut clear_preview_selection = false;
         if let Some(batch) = &self.active_batch {
+            batch_item_ids = batch.item_ids.clone();
             while let Ok(event) = batch.receiver.try_recv() {
                 match event {
                     BatchEvent::VideoStarted { id } => {
@@ -113,6 +152,7 @@ impl CompressVideosPage {
                         }
                         if self.selected_id == Some(id) {
                             self.selected_id = None;
+                            clear_preview_selection = true;
                         }
                     }
                     BatchEvent::VideoProgress { id, progress } => {
@@ -126,6 +166,7 @@ impl CompressVideosPage {
                         }
                         if self.selected_id == Some(id) {
                             self.selected_id = None;
+                            clear_preview_selection = true;
                         }
                     }
                     BatchEvent::VideoFailed { id, error } => {
@@ -140,21 +181,27 @@ impl CompressVideosPage {
             }
         }
 
+        if clear_preview_selection {
+            self.reset_preview_state();
+        }
+
         if let Some(cancelled) = finished {
             if cancelled {
                 for item in &mut self.queue {
-                    if matches!(item.state, VideoCompressionState::Ready) {
-                        continue;
-                    }
-                    if matches!(item.state, VideoCompressionState::Compressing(_)) {
+                    if batch_item_ids.contains(&item.id)
+                        && matches!(
+                            item.state,
+                            VideoCompressionState::Ready | VideoCompressionState::Compressing(_)
+                        )
+                    {
                         item.state = VideoCompressionState::Cancelled;
                     }
                 }
                 self.banner = Some(BannerMessage {
                     tone: BannerTone::Info,
-                    text: "Batch cancelled. Finished videos remain in the output folder.".into(),
+                    text: "Compression cancelled for the current video.".into(),
                 });
-            } else {
+            } else if self.pending_compression_ids.is_empty() {
                 let completed_count = self
                     .queue
                     .iter()
@@ -235,7 +282,7 @@ impl CompressVideosPage {
             });
 
             let (tx, rx) = mpsc::channel();
-            self.pending_probes.push(PendingProbe {
+            self.pending_probes.push(super::PendingProbe {
                 id,
                 encoders: engine.encoders.clone(),
                 receiver: rx,
@@ -256,7 +303,7 @@ impl CompressVideosPage {
                     None
                 };
 
-                let _ = tx.send(ProbeResult {
+                let _ = tx.send(super::ProbeResult {
                     metadata: metadata_result,
                     thumbnail,
                 });
@@ -269,30 +316,14 @@ impl CompressVideosPage {
         });
     }
 
+    /// Schedules every ready video and starts the next job immediately when idle.
     pub(in crate::modules::compress_videos) fn start_batch_compression(
         &mut self,
         engine: &VideoEngineController,
+        use_hardware_acceleration: bool,
     ) {
-        let Some(engine) = engine.active_info().cloned() else {
-            return;
-        };
-
-        let items: Vec<BatchItem> = self
-            .queue
-            .iter()
-            .filter(|item| matches!(item.state, VideoCompressionState::Ready))
-            .filter_map(|item| {
-                let video = item.metadata.clone()?;
-                let settings = item.settings.clone()?;
-                Some(BatchItem {
-                    id: item.id,
-                    video,
-                    settings,
-                })
-            })
-            .collect();
-
-        if items.is_empty() {
+        let scheduled_count = self.schedule_ready_videos();
+        if scheduled_count == 0 && self.active_batch.is_none() {
             self.banner = Some(BannerMessage {
                 tone: BannerTone::Info,
                 text: "No videos ready to compress.".into(),
@@ -300,21 +331,180 @@ impl CompressVideosPage {
             return;
         }
 
-        match processor::start_video_batch(engine, items, self.output_dir.clone()) {
-            Ok(handle) => {
-                self.last_output_dir = Some(handle.output_dir.clone());
-                self.active_batch = Some(handle);
-                self.banner = Some(BannerMessage {
-                    tone: BannerTone::Info,
-                    text: "Batch compression started.".into(),
-                });
-            }
-            Err(error) => {
-                self.banner = Some(BannerMessage {
-                    tone: BannerTone::Error,
-                    text: error,
-                });
+        self.start_next_scheduled_video(engine, use_hardware_acceleration);
+
+        if scheduled_count > 0 {
+            self.banner = Some(BannerMessage {
+                tone: BannerTone::Info,
+                text: if self.active_batch.is_some() {
+                    format!("{scheduled_count} video(s) added to the compression queue.")
+                } else {
+                    format!("{scheduled_count} video(s) scheduled for compression.")
+                },
+            });
+        }
+    }
+
+    /// Schedules a single ready video for compression.
+    pub(in crate::modules::compress_videos) fn start_single_compression(
+        &mut self,
+        id: u64,
+        engine: &VideoEngineController,
+        use_hardware_acceleration: bool,
+    ) {
+        if !self.schedule_video(id) {
+            self.banner = Some(BannerMessage {
+                tone: BannerTone::Info,
+                text: "Video is already queued for compression.".into(),
+            });
+            return;
+        }
+
+        self.start_next_scheduled_video(engine, use_hardware_acceleration);
+        self.banner = Some(BannerMessage {
+            tone: BannerTone::Info,
+            text: "Video added to the compression queue.".into(),
+        });
+    }
+
+    fn schedule_ready_videos(&mut self) -> usize {
+        let ids: Vec<u64> = self
+            .queue
+            .iter()
+            .filter(|item| matches!(item.state, VideoCompressionState::Ready))
+            .map(|item| item.id)
+            .collect();
+        let mut scheduled = 0;
+        for id in ids {
+            if self.schedule_video(id) {
+                scheduled += 1;
             }
         }
+        scheduled
+    }
+
+    fn schedule_video(&mut self, id: u64) -> bool {
+        let active_contains = self
+            .active_batch
+            .as_ref()
+            .map(|batch| batch.item_ids.contains(&id))
+            .unwrap_or(false);
+        if active_contains || self.pending_compression_ids.contains(&id) {
+            return false;
+        }
+
+        if self
+            .queue
+            .iter()
+            .any(|item| item.id == id && matches!(item.state, VideoCompressionState::Ready))
+        {
+            self.pending_compression_ids.push(id);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn start_next_scheduled_video(
+        &mut self,
+        engine: &VideoEngineController,
+        use_hardware_acceleration: bool,
+    ) {
+        if self.active_batch.is_some() {
+            return;
+        }
+
+        let Some(mut engine_info) = engine.active_info().cloned() else {
+            return;
+        };
+        engine_info.encoders = engine_info
+            .encoders
+            .with_hardware_acceleration(use_hardware_acceleration);
+
+        while let Some(id) = self.pending_compression_ids.first().copied() {
+            let Some(item) = self
+                .queue
+                .iter()
+                .find(|item| item.id == id && matches!(item.state, VideoCompressionState::Ready))
+            else {
+                self.pending_compression_ids.remove(0);
+                continue;
+            };
+
+            let Some(video) = item.metadata.clone() else {
+                self.pending_compression_ids.remove(0);
+                continue;
+            };
+            let Some(settings) = item.settings.clone() else {
+                self.pending_compression_ids.remove(0);
+                continue;
+            };
+
+            let batch_item = BatchItem {
+                id,
+                video,
+                settings,
+            };
+            match processor::start_video_batch(
+                engine_info.clone(),
+                vec![batch_item],
+                self.output_dir.clone(),
+            ) {
+                Ok(handle) => {
+                    self.last_output_dir = Some(handle.output_dir.clone());
+                    self.active_batch = Some(handle);
+                    self.pending_compression_ids.remove(0);
+                }
+                Err(error) => {
+                    self.pending_compression_ids.remove(0);
+                    self.banner = Some(BannerMessage {
+                        tone: BannerTone::Error,
+                        text: error,
+                    });
+                }
+            }
+            return;
+        }
+    }
+
+    /// Opens the confirmation dialog for bulk cancellation.
+    pub(in crate::modules::compress_videos) fn request_cancel_all(&mut self) {
+        self.show_cancel_all_confirm = true;
+    }
+
+    /// Confirms bulk cancellation for the active job and any queued jobs.
+    pub(in crate::modules::compress_videos) fn confirm_cancel_all(&mut self) {
+        self.show_cancel_all_confirm = false;
+        let had_active_job = self.active_batch.is_some();
+        self.cancel_compression();
+        if !had_active_job {
+            self.banner = Some(BannerMessage {
+                tone: BannerTone::Info,
+                text: "All queued compression jobs were cancelled.".into(),
+            });
+        }
+    }
+
+    /// Closes the bulk cancellation confirmation dialog without changing job state.
+    pub(in crate::modules::compress_videos) fn dismiss_cancel_all(&mut self) {
+        self.show_cancel_all_confirm = false;
+    }
+
+    /// Returns true when there is an active or queued compression job.
+    pub(in crate::modules::compress_videos) fn has_pending_compression(&self) -> bool {
+        self.active_batch.is_some() || !self.pending_compression_ids.is_empty()
+    }
+
+    /// Returns true when the given queue item is either active or already scheduled.
+    pub(in crate::modules::compress_videos) fn is_video_pending_compression(
+        &self,
+        id: u64,
+    ) -> bool {
+        self.pending_compression_ids.contains(&id)
+            || self
+                .active_batch
+                .as_ref()
+                .map(|batch| batch.item_ids.contains(&id))
+                .unwrap_or(false)
     }
 }

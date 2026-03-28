@@ -114,13 +114,6 @@ impl CompressVideosPage {
                             .strong()
                             .color(theme.colors.fg),
                     );
-                    ui.label(
-                        RichText::new(
-                            "The bundled engine is being detected or a managed update is being prepared.",
-                        )
-                        .size(11.5)
-                        .color(theme.colors.fg_dim),
-                    );
                 });
             }
             EngineStatus::Downloading { progress, stage } => {
