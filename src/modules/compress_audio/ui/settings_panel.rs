@@ -1,427 +1,478 @@
-use eframe::egui::{self, Button, Color32, CornerRadius, ProgressBar, RichText, Stroke, Ui};
+use eframe::egui::{self, Align, Layout, RichText, ScrollArea, Slider, Stroke, Ui, vec2};
 
 use crate::{
     modules::{
         compress_audio::{
             logic::estimate_output,
-            models::{AudioEstimate, AudioFormat, AudioWorkflowMode},
+            models::{
+                AudioAutoPreset, AudioCompressionSettings, AudioFormat, AudioMetadata,
+                AudioWorkflowMode,
+            },
         },
-        compress_videos::engine::VideoEngineController,
+        compress_videos::{engine::VideoEngineController, models::EncoderAvailability},
     },
     theme::AppTheme,
     ui::components::{hint, panel},
 };
 
 use super::{
-    CompressAudioPage,
+    BannerMessage, BannerTone, CompressAudioPage, compact,
+    controls::selection_card,
     helpers::{
-        format_available, format_bytes, overall_progress, selectable_option_row, toggle_button,
+        channel_choices, format_audio_channels, format_audio_sample_rate, format_available,
+        output_summary, sample_rate_choices,
     },
+    is_audio_settings_editable, truncate_filename,
+    widgets::{format_bytes, format_duration, render_panel_message},
 };
 
 impl CompressAudioPage {
-    pub(super) fn render_settings_column(
+    pub(super) fn render_settings_panel(
         &mut self,
         ui: &mut Ui,
         theme: &AppTheme,
-        engine: &mut VideoEngineController,
+        height: f32,
+        engine: &VideoEngineController,
     ) {
-        let selected_metadata = self
-            .selected_id
-            .and_then(|id| self.find_item(id))
-            .and_then(|item| item.metadata.clone());
-        let selected_analysis = self
-            .selected_id
-            .and_then(|id| self.find_item(id))
-            .and_then(|item| item.analysis.clone());
-        let estimate = selected_metadata.as_ref().and_then(|metadata| {
-            engine
-                .active_info()
-                .map(|engine_info| estimate_output(metadata, &self.settings, &engine_info.encoders))
-        });
+        panel::card(theme)
+            .inner_margin(egui::Margin::same(14))
+            .show(ui, |ui| {
+                compact(ui);
+                ui.set_min_height((height - 28.0).max(0.0));
 
-        panel::card(theme).show(ui, |ui| {
+                let Some(selected_id) = self.selected_id else {
+                    render_panel_message(
+                        ui,
+                        theme,
+                        height,
+                        "Settings",
+                        "Select an audio from the queue.",
+                    );
+                    return;
+                };
+
+                let Some(item) = self.find_item(selected_id).cloned() else {
+                    render_panel_message(
+                        ui,
+                        theme,
+                        height,
+                        "Settings",
+                        "Select an audio from the queue.",
+                    );
+                    return;
+                };
+
+                if !is_audio_settings_editable(&item.state) {
+                    self.selected_id = None;
+                    render_panel_message(
+                        ui,
+                        theme,
+                        height,
+                        "Settings",
+                        "Settings are only available while the audio is still in the queue.",
+                    );
+                    return;
+                }
+
+                let Some(metadata) = item.metadata.clone() else {
+                    render_panel_message(
+                        ui,
+                        theme,
+                        height,
+                        "Settings",
+                        "Settings will be available after the audio finishes analysis.",
+                    );
+                    return;
+                };
+
+                let Some(mut settings) = item.settings.clone() else {
+                    render_panel_message(
+                        ui,
+                        theme,
+                        height,
+                        "Settings",
+                        "Settings will be available after the audio finishes analysis.",
+                    );
+                    return;
+                };
+
+                let encoders = engine
+                    .active_info()
+                    .map(|info| info.encoders.clone())
+                    .unwrap_or_default();
+                let estimate = estimate_output(&metadata, &settings, &encoders);
+
+                render_settings_header(ui, theme, &item.file_name, &metadata);
+
+                ScrollArea::vertical()
+                    .id_salt("audio_settings_scroll")
+                    .auto_shrink([false, false])
+                    .max_height((height - 100.0).max(0.0))
+                    .show(ui, |ui| {
+                        compact(ui);
+                        render_mode_selector(ui, theme, &mut settings);
+                        ui.add_space(6.0);
+                        render_output_badge(ui, theme, &estimate, settings.mode);
+                        ui.add_space(8.0);
+
+                        match settings.mode {
+                            AudioWorkflowMode::Auto => {
+                                render_auto_controls(ui, theme, &mut settings)
+                            }
+                            AudioWorkflowMode::Manual => {
+                                render_manual_controls(ui, theme, &encoders, &mut settings)
+                            }
+                        }
+
+                        ui.add_space(8.0);
+                        render_bottom_panels(ui, theme, &mut settings, &metadata, &estimate);
+                        ui.add_space(8.0);
+                        if render_apply_to_all_button(ui, theme) {
+                            self.apply_settings_to_ready_audios(&settings);
+                        }
+                    });
+
+                if let Some(queue_item) = self.find_item_mut(selected_id) {
+                    queue_item.settings = Some(settings);
+                }
+            });
+    }
+
+    fn apply_settings_to_ready_audios(&mut self, settings: &AudioCompressionSettings) {
+        for queue_item in &mut self.queue {
+            if matches!(
+                &queue_item.state,
+                crate::modules::compress_audio::models::AudioCompressionState::Ready
+            ) {
+                queue_item.settings = Some(settings.clone());
+            }
+        }
+
+        self.banner = Some(BannerMessage {
+            tone: BannerTone::Info,
+            text: "Settings applied to all ready audio files.".to_owned(),
+        });
+    }
+}
+
+fn render_settings_header(
+    ui: &mut Ui,
+    theme: &AppTheme,
+    file_name: &str,
+    metadata: &AudioMetadata,
+) {
+    ui.label(
+        RichText::new(format!("Settings - {}", truncate_filename(file_name, 24)))
+            .size(14.0)
+            .strong()
+            .color(theme.colors.fg),
+    );
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new(format!(
+            "{} | {} | {} | {}",
+            format_bytes(metadata.size_bytes),
+            format_duration(metadata.duration_secs),
+            format_audio_sample_rate(metadata.sample_rate_hz),
+            format_audio_channels(metadata.channels),
+        ))
+        .size(11.0)
+        .color(theme.colors.fg_dim),
+    );
+    ui.add_space(8.0);
+}
+
+fn render_mode_selector(ui: &mut Ui, theme: &AppTheme, settings: &mut AudioCompressionSettings) {
+    for mode in AudioWorkflowMode::ALL {
+        if selection_card(
+            ui,
+            theme,
+            mode.title(),
+            mode.description(),
+            settings.mode == mode,
+        )
+        .clicked()
+        {
+            settings.mode = mode;
+        }
+    }
+}
+
+fn render_output_badge(
+    ui: &mut Ui,
+    theme: &AppTheme,
+    estimate: &crate::modules::compress_audio::models::AudioEstimate,
+    mode: AudioWorkflowMode,
+) {
+    let label = format!(
+        "{} output: {}",
+        match mode {
+            AudioWorkflowMode::Auto => "Smart",
+            AudioWorkflowMode::Manual => "Current",
+        },
+        output_summary(estimate.output_format, estimate.target_bitrate_kbps)
+    );
+
+    ui.label(
+        RichText::new(label)
+            .size(11.0)
+            .strong()
+            .color(theme.colors.accent),
+    );
+}
+
+fn render_auto_controls(ui: &mut Ui, theme: &AppTheme, settings: &mut AudioCompressionSettings) {
+    for preset in AudioAutoPreset::ALL {
+        if selection_card(
+            ui,
+            theme,
+            preset.label(),
+            preset.detail(),
+            settings.auto_preset == preset,
+        )
+        .clicked()
+        {
+            settings.auto_preset = preset;
+        }
+    }
+}
+
+fn render_manual_controls(
+    ui: &mut Ui,
+    theme: &AppTheme,
+    encoders: &EncoderAvailability,
+    settings: &mut AudioCompressionSettings,
+) {
+    hint::title(
+        ui,
+        theme,
+        "Format",
+        12.0,
+        Some("Pick the output codec/container used in Manual mode."),
+    );
+    ui.horizontal_wrapped(|ui| {
+        for format in AudioFormat::ALL {
+            let available = format_available(format, encoders);
+            ui.add_enabled_ui(available, |ui| {
+                if super::controls::choice_button(
+                    ui,
+                    theme,
+                    format.label(),
+                    settings.manual_format == format,
+                )
+                .clicked()
+                {
+                    settings.manual_format = format;
+                }
+            });
+        }
+    });
+
+    ui.add_space(4.0);
+    let bitrate_enabled = !settings.manual_format.is_lossless();
+    ui.add_enabled_ui(bitrate_enabled, |ui| {
+        hint::title(
+            ui,
+            theme,
+            &format!("Bitrate: {} kbps", settings.manual_bitrate_kbps),
+            12.0,
+            Some("Lower targets shrink the file more aggressively."),
+        );
+        ui.add(Slider::new(&mut settings.manual_bitrate_kbps, 24..=320).suffix(" kbps"));
+    });
+
+    ui.add_space(4.0);
+    ui.checkbox(&mut settings.advanced_open, "Advanced");
+    if settings.advanced_open {
+        panel::inset(theme).show(ui, |ui| {
             hint::title(
                 ui,
                 theme,
-                "Settings Panel",
-                16.0,
-                Some(
-                    "Keep Auto Mode on for the simplest workflow, or switch to Manual when you need a specific output format.",
-                ),
+                "Sample Rate",
+                12.0,
+                Some("Resample the output only when you need smaller files or compatibility."),
             );
-            ui.add_space(12.0);
-
-            if let Some(analysis) = selected_analysis.as_ref() {
-                panel::tinted(theme, theme.colors.accent).show(ui, |ui| {
-                    ui.label(
-                        RichText::new(&analysis.headline)
-                            .size(13.0)
-                            .strong()
-                            .color(theme.colors.fg),
-                    );
-                    ui.add_space(4.0);
-                    ui.label(
-                        RichText::new(&analysis.detail)
-                            .size(12.0)
-                            .color(theme.colors.fg_dim),
-                    );
-                });
-                ui.add_space(12.0);
-            }
-
-            self.render_mode_toggle(ui, theme);
-            ui.add_space(12.0);
-
-            match self.settings.mode {
-                AudioWorkflowMode::Auto => self.render_auto_controls(ui, theme),
-                AudioWorkflowMode::Manual => {
-                    self.render_manual_controls(ui, theme, engine.active_info())
-                }
-            }
-
-            ui.add_space(12.0);
-            self.render_extra_options(ui, theme);
-            ui.add_space(12.0);
-            self.render_output_preview(ui, theme, estimate.as_ref(), selected_metadata.as_ref());
-            ui.add_space(12.0);
-            self.render_actions(ui, theme, engine);
-        });
-    }
-
-    fn render_mode_toggle(&mut self, ui: &mut Ui, theme: &AppTheme) {
-        ui.horizontal(|ui| {
-            if toggle_button(
+            option_row(
                 ui,
                 theme,
-                self.settings.mode == AudioWorkflowMode::Auto,
-                "Auto (recommended)",
-            )
-            .clicked()
-            {
-                self.settings.mode = AudioWorkflowMode::Auto;
-            }
-
-            if toggle_button(
-                ui,
-                theme,
-                self.settings.mode == AudioWorkflowMode::Manual,
-                "Manual",
-            )
-            .clicked()
-            {
-                self.settings.mode = AudioWorkflowMode::Manual;
-            }
-        });
-    }
-
-    fn render_auto_controls(&mut self, ui: &mut Ui, theme: &AppTheme) {
-        hint::title(
-            ui,
-            theme,
-            "Smart Mode",
-            13.0,
-            Some(
-                "Auto chooses between AAC and OPUS based on the file type, then falls back to MP3 only when needed.",
-            ),
-        );
-        ui.add_space(8.0);
-
-        for preset in [
-            crate::modules::compress_audio::models::AudioAutoPreset::HighQuality,
-            crate::modules::compress_audio::models::AudioAutoPreset::Balanced,
-            crate::modules::compress_audio::models::AudioAutoPreset::SmallSize,
-        ] {
-            let selected = self.settings.auto_preset == preset;
-            if toggle_button(ui, theme, selected, preset.label()).clicked() {
-                self.settings.auto_preset = preset;
-            }
-            ui.label(
-                RichText::new(preset.detail())
-                    .size(11.5)
-                    .color(theme.colors.fg_dim),
+                &mut settings.manual_sample_rate_hz,
+                &sample_rate_choices(),
             );
-            ui.add_space(6.0);
-        }
-    }
 
-    fn render_manual_controls(
-        &mut self,
-        ui: &mut Ui,
-        theme: &AppTheme,
-        engine_info: Option<&crate::modules::compress_videos::models::EngineInfo>,
-    ) {
-        hint::title(
-            ui,
-            theme,
-            "Manual Mode",
-            13.0,
-            Some(
-                "Pick the output format yourself, then fine tune bitrate or advanced conversion options.",
-            ),
-        );
-        ui.add_space(8.0);
-
-        egui::ComboBox::from_id_salt("audio_manual_format")
-            .selected_text(self.settings.manual_format.label())
-            .show_ui(ui, |ui| {
-                for format in [
-                    AudioFormat::Aac,
-                    AudioFormat::Opus,
-                    AudioFormat::Mp3,
-                    AudioFormat::Flac,
-                ] {
-                    let available = engine_info
-                        .map(|engine| format_available(format, &engine.encoders))
-                        .unwrap_or(true);
-                    if available {
-                        ui.selectable_value(
-                            &mut self.settings.manual_format,
-                            format,
-                            format.label(),
-                        );
-                    }
-                }
-            });
-
-        ui.add_space(8.0);
-        let bitrate_enabled = !self.settings.manual_format.is_lossless();
-        ui.add_enabled_ui(bitrate_enabled, |ui| {
-            ui.label(
-                RichText::new(format!(
-                    "Bitrate: {} kbps",
-                    self.settings.manual_bitrate_kbps
-                ))
-                .size(12.0)
-                .color(theme.colors.fg),
-            );
-            ui.add(
-                egui::Slider::new(&mut self.settings.manual_bitrate_kbps, 24..=320).suffix(" kbps"),
-            );
-        });
-        if !bitrate_enabled {
-            ui.label(
-                RichText::new("FLAC keeps audio lossless, so bitrate is handled automatically.")
-                    .size(11.5)
-                    .color(theme.colors.fg_dim),
-            );
-        }
-
-        ui.add_space(8.0);
-        ui.checkbox(&mut self.settings.advanced_open, "Show advanced settings");
-        if self.settings.advanced_open {
-            ui.add_space(8.0);
-            panel::inset(theme).show(ui, |ui| {
-                ui.label(
-                    RichText::new("Sample Rate")
-                        .size(12.0)
-                        .strong()
-                        .color(theme.colors.fg),
-                );
-                selectable_option_row(
-                    ui,
-                    theme,
-                    &mut self.settings.manual_sample_rate_hz,
-                    &[
-                        (None, "Original"),
-                        (Some(22_050), "22.05 kHz"),
-                        (Some(32_000), "32 kHz"),
-                        (Some(44_100), "44.1 kHz"),
-                        (Some(48_000), "48 kHz"),
-                    ],
-                );
-
-                ui.add_space(10.0);
-                ui.label(
-                    RichText::new("Channels")
-                        .size(12.0)
-                        .strong()
-                        .color(theme.colors.fg),
-                );
-                selectable_option_row(
-                    ui,
-                    theme,
-                    &mut self.settings.manual_channels,
-                    &[(None, "Original"), (Some(1), "Mono"), (Some(2), "Stereo")],
-                );
-            });
-        }
-    }
-
-    fn render_extra_options(&mut self, ui: &mut Ui, theme: &AppTheme) {
-        hint::title(
-            ui,
-            theme,
-            "Extra Options",
-            13.0,
-            Some(
-                "These stay tucked away from beginners, but they are ready when you need cleanup or format conversion workflows.",
-            ),
-        );
-        ui.add_space(8.0);
-        panel::inset(theme).show(ui, |ui| {
-            ui.checkbox(&mut self.settings.normalize_volume, "Normalize volume");
-            ui.checkbox(&mut self.settings.remove_metadata, "Remove metadata");
-            ui.checkbox(
-                &mut self.settings.convert_format_only,
-                "Convert format only (no compression focus)",
-            );
-        });
-    }
-
-    fn render_output_preview(
-        &self,
-        ui: &mut Ui,
-        theme: &AppTheme,
-        estimate: Option<&AudioEstimate>,
-        selected_metadata: Option<&crate::modules::compress_audio::models::AudioMetadata>,
-    ) {
-        hint::title(
-            ui,
-            theme,
-            "Output Preview",
-            13.0,
-            Some(
-                "Estimated size uses the current settings, so it updates before you start the batch.",
-            ),
-        );
-        ui.add_space(8.0);
-
-        panel::inset(theme).show(ui, |ui| match (selected_metadata, estimate) {
-            (Some(metadata), Some(estimate)) => {
-                ui.label(
-                    RichText::new(format!(
-                        "Original size: {}",
-                        format_bytes(metadata.size_bytes)
-                    ))
-                    .size(12.0)
-                    .color(theme.colors.fg),
-                );
-                ui.label(
-                    RichText::new(format!(
-                        "Estimated size: {}",
-                        format_bytes(estimate.estimated_size_bytes)
-                    ))
-                    .size(12.0)
-                    .color(theme.colors.fg),
-                );
-
-                let output_label = estimate
-                    .target_bitrate_kbps
-                    .map(|bitrate| format!("{} | {} kbps", estimate.output_format.label(), bitrate))
-                    .unwrap_or_else(|| estimate.output_format.label().to_owned());
-                ui.label(
-                    RichText::new(format!("Output: {output_label}"))
-                        .size(12.0)
-                        .color(theme.colors.fg),
-                );
-                ui.add_space(6.0);
-                ui.label(
-                    RichText::new(format!(
-                        "Estimated reduction: {:.0}%",
-                        estimate.savings_percent.max(-100.0)
-                    ))
-                    .size(12.0)
-                    .strong()
-                    .color(theme.colors.fg),
-                );
-                if let Some(recommendation) = &estimate.recommendation {
-                    ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(recommendation)
-                            .size(11.5)
-                            .color(theme.colors.fg_dim),
-                    );
-                }
-                for warning in &estimate.warnings {
-                    ui.add_space(6.0);
-                    ui.label(RichText::new(warning).size(11.5).color(theme.colors.fg_dim));
-                }
-                if let Some(skip_reason) = &estimate.skip_reason {
-                    ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(skip_reason)
-                            .size(11.5)
-                            .color(theme.colors.negative),
-                    );
-                }
-            }
-            _ => {
-                ui.label(
-                    RichText::new(
-                        "Select an analyzed audio file to see size estimates and warnings.",
-                    )
-                    .size(12.0)
-                    .color(theme.colors.fg_dim),
-                );
-            }
-        });
-    }
-
-    fn render_actions(
-        &mut self,
-        ui: &mut Ui,
-        theme: &AppTheme,
-        engine: &mut VideoEngineController,
-    ) {
-        let ready_count = self
-            .queue
-            .iter()
-            .filter(|item| item.metadata.is_some())
-            .count();
-
-        ui.label(
-            RichText::new(format!("Ready in queue: {} file(s)", ready_count))
-                .size(11.5)
-                .color(theme.colors.fg_dim),
-        );
-        ui.add_space(8.0);
-
-        if self.is_compressing() {
-            ui.label(
-                RichText::new(format!(
-                    "Overall progress: {:.0}%",
-                    overall_progress(&self.queue) * 100.0
-                ))
-                .size(12.0)
-                .color(theme.colors.fg),
-            );
-            ui.add(
-                ProgressBar::new(overall_progress(&self.queue))
-                    .desired_width(ui.available_width())
-                    .show_percentage(),
-            );
             ui.add_space(10.0);
-        }
-
-        ui.horizontal(|ui| {
-            let start_button = Button::new(
-                RichText::new("Start Compression")
-                    .size(12.0)
-                    .strong()
-                    .color(Color32::BLACK),
-            )
-            .fill(theme.colors.accent)
-            .stroke(Stroke::NONE)
-            .corner_radius(CornerRadius::ZERO);
-            if ui
-                .add_enabled(!self.is_compressing() && ready_count > 0, start_button)
-                .clicked()
-            {
-                self.start_compression(engine);
-            }
-
-            let cancel_button =
-                Button::new(RichText::new("Cancel").size(12.0).color(theme.colors.fg))
-                    .fill(theme.colors.bg_raised)
-                    .stroke(Stroke::new(1.0, theme.colors.border))
-                    .corner_radius(CornerRadius::ZERO);
-            if ui
-                .add_enabled(self.is_compressing(), cancel_button)
-                .clicked()
-            {
-                self.cancel_compression();
-            }
+            hint::title(
+                ui,
+                theme,
+                "Channels",
+                12.0,
+                Some("Downmix to mono for voice or keep stereo when spatial detail matters."),
+            );
+            option_row(ui, theme, &mut settings.manual_channels, &channel_choices());
         });
     }
+}
+
+fn render_extra_options(ui: &mut Ui, theme: &AppTheme, settings: &mut AudioCompressionSettings) {
+    hint::title(
+        ui,
+        theme,
+        "Extra",
+        12.0,
+        Some("Optional cleanup and conversion behaviors."),
+    );
+    panel::inset(theme).show(ui, |ui| {
+        ui.checkbox(&mut settings.normalize_volume, "Normalize Volume");
+        ui.checkbox(&mut settings.remove_metadata, "Remove Metadata");
+        ui.checkbox(&mut settings.convert_format_only, "Convert Format Only");
+    });
+}
+
+fn render_bottom_panels(
+    ui: &mut Ui,
+    theme: &AppTheme,
+    settings: &mut AudioCompressionSettings,
+    metadata: &AudioMetadata,
+    estimate: &crate::modules::compress_audio::models::AudioEstimate,
+) {
+    let available_width = ui.available_width();
+    if available_width >= 360.0 {
+        let gutter = 12.0;
+        let panel_width = ((available_width - gutter) * 0.5).max(0.0);
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing = vec2(gutter, 0.0);
+            ui.allocate_ui_with_layout(
+                vec2(panel_width, 0.0),
+                Layout::top_down(Align::Min),
+                |ui| render_extra_options(ui, theme, settings),
+            );
+            ui.allocate_ui_with_layout(
+                vec2(panel_width, 0.0),
+                Layout::top_down(Align::Min),
+                |ui| render_estimate(ui, theme, metadata, estimate),
+            );
+        });
+    } else {
+        render_extra_options(ui, theme, settings);
+        ui.add_space(8.0);
+        render_estimate(ui, theme, metadata, estimate);
+    }
+}
+
+fn render_estimate(
+    ui: &mut Ui,
+    theme: &AppTheme,
+    metadata: &AudioMetadata,
+    estimate: &crate::modules::compress_audio::models::AudioEstimate,
+) {
+    hint::title(
+        ui,
+        theme,
+        "Estimate",
+        12.0,
+        Some("Preview the current output size before compression starts."),
+    );
+    panel::inset(theme).show(ui, |ui| {
+        ui.label(
+            RichText::new(format!("Original: {}", format_bytes(metadata.size_bytes)))
+                .size(11.5)
+                .color(theme.colors.fg),
+        );
+        ui.label(
+            RichText::new(format!(
+                "Estimated: {}",
+                format_bytes(estimate.estimated_size_bytes)
+            ))
+            .size(11.5)
+            .color(theme.colors.fg),
+        );
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(format!(
+                "Estimated reduction: {:.0}%",
+                estimate.savings_percent.max(-100.0)
+            ))
+            .size(11.5)
+            .strong()
+            .color(if estimate.savings_percent >= 0.0 {
+                theme.colors.positive
+            } else {
+                theme.colors.caution
+            }),
+        );
+
+        if let Some(sample_rate_hz) = estimate.effective_sample_rate_hz {
+            ui.label(
+                RichText::new(format!(
+                    "Sample rate: {}",
+                    format_audio_sample_rate(sample_rate_hz)
+                ))
+                .size(10.5)
+                .color(theme.colors.fg_dim),
+            );
+        }
+
+        if let Some(channels) = estimate.effective_channels {
+            ui.label(
+                RichText::new(format!("Channels: {}", format_audio_channels(channels)))
+                    .size(10.5)
+                    .color(theme.colors.fg_dim),
+            );
+        }
+
+        if let Some(recommendation) = &estimate.recommendation {
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(recommendation)
+                    .size(10.5)
+                    .color(theme.colors.fg_dim),
+            );
+        }
+
+        for warning in &estimate.warnings {
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(warning)
+                    .size(10.5)
+                    .color(theme.colors.fg_muted),
+            );
+        }
+
+        if let Some(skip_reason) = &estimate.skip_reason {
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(skip_reason)
+                    .size(10.5)
+                    .color(theme.colors.negative),
+            );
+        }
+    });
+}
+
+fn render_apply_to_all_button(ui: &mut Ui, theme: &AppTheme) -> bool {
+    ui.add(
+        egui::Button::new(
+            RichText::new("Apply Settings to All Ready Audio")
+                .size(11.5)
+                .color(theme.colors.fg),
+        )
+        .fill(theme.colors.bg_raised)
+        .stroke(Stroke::new(1.0, theme.colors.border))
+        .corner_radius(egui::CornerRadius::ZERO),
+    )
+    .clicked()
+}
+
+fn option_row<T: Copy + PartialEq>(
+    ui: &mut Ui,
+    theme: &AppTheme,
+    value: &mut Option<T>,
+    options: &[(Option<T>, &'static str)],
+) {
+    ui.horizontal_wrapped(|ui| {
+        for (candidate, label) in options {
+            if super::controls::choice_button(ui, theme, label, *value == *candidate).clicked() {
+                *value = *candidate;
+            }
+        }
+    });
 }

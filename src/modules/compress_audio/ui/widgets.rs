@@ -1,0 +1,516 @@
+use eframe::egui::{
+    self, Color32, CornerRadius, Id, Rect, RichText, Sense, Stroke, StrokeKind, Ui, pos2, vec2,
+};
+
+use crate::{
+    icons,
+    modules::compress_audio::models::{AudioCompressionState, AudioQueueItem},
+    theme::AppTheme,
+};
+
+use super::{helpers::format_audio_channels, truncate_filename};
+
+pub(super) fn render_panel_message(
+    ui: &mut Ui,
+    theme: &AppTheme,
+    height: f32,
+    title: &str,
+    message: &str,
+) {
+    let body_height = (height - 32.0).max(140.0);
+    ui.allocate_ui_with_layout(
+        vec2(ui.available_width(), body_height),
+        egui::Layout::top_down(egui::Align::Min),
+        |ui| {
+            ui.add_space((body_height - 54.0).max(0.0) * 0.5);
+            ui.vertical_centered(|ui| {
+                ui.label(
+                    RichText::new(title)
+                        .size(14.0)
+                        .strong()
+                        .color(theme.colors.fg),
+                );
+                ui.add_space(8.0);
+                ui.label(RichText::new(message).size(12.0).color(theme.colors.fg_dim));
+            });
+        },
+    );
+}
+
+pub(super) fn queue_section_header(
+    ui: &mut Ui,
+    theme: &AppTheme,
+    title: &str,
+    count: usize,
+    tint: Color32,
+) {
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(format!("{title} - {count}"))
+                .size(12.0)
+                .strong()
+                .color(tint),
+        );
+    });
+    let width = ui.available_width();
+    let (line_rect, _) = ui.allocate_exact_size(vec2(width, 1.0), Sense::hover());
+    ui.painter().rect_filled(
+        line_rect,
+        CornerRadius::ZERO,
+        theme.mix(theme.colors.border, tint, 0.30),
+    );
+    ui.add_space(4.0);
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum QueuePrimaryAction {
+    None,
+    StartCompress,
+    Queued,
+    Cancel,
+}
+
+pub(super) struct QueueRowAction {
+    pub(super) clicked: bool,
+    pub(super) deleted: bool,
+    pub(super) start_requested: bool,
+    pub(super) cancel_requested: bool,
+}
+
+pub(super) fn audio_queue_row(
+    ui: &mut Ui,
+    theme: &AppTheme,
+    item: &AudioQueueItem,
+    selected: bool,
+    can_delete: bool,
+    primary_action: QueuePrimaryAction,
+) -> QueueRowAction {
+    let mut action = QueueRowAction {
+        clicked: false,
+        deleted: false,
+        start_requested: false,
+        cancel_requested: false,
+    };
+    let row_id = Id::new("aq_row").with(item.id);
+    let row_width = ui.available_width();
+    let row_height = 64.0_f32;
+    let (row_rect, _) = ui.allocate_exact_size(vec2(row_width, row_height), Sense::hover());
+    let row_response = ui.interact(row_rect, row_id.with("click"), Sense::click());
+    let pointer_inside_row = ui.ctx().input(|input| {
+        input
+            .pointer
+            .hover_pos()
+            .or_else(|| input.pointer.interact_pos())
+            .map(|pointer_position| row_rect.contains(pointer_position))
+            .unwrap_or(false)
+    });
+
+    let button_height = 24.0;
+    let button_y = row_rect.center().y - button_height * 0.5;
+    let delete_rect = Rect::from_min_size(
+        pos2(row_rect.right() - 24.0 - 8.0, button_y),
+        vec2(24.0, button_height),
+    );
+    let delete_response = if can_delete {
+        Some(ui.interact(delete_rect, row_id.with("trash"), Sense::click()))
+    } else {
+        None
+    };
+    let show_delete_button = can_delete && pointer_inside_row;
+    let show_primary_button = should_show_primary_button(primary_action, pointer_inside_row);
+    let primary_rect = primary_button_rect(
+        primary_action,
+        row_rect,
+        show_primary_button,
+        show_delete_button,
+    );
+    let primary_response = primary_rect.map(|rect| {
+        ui.interact(
+            rect,
+            row_id.with("primary"),
+            match primary_action {
+                QueuePrimaryAction::StartCompress | QueuePrimaryAction::Cancel => Sense::click(),
+                QueuePrimaryAction::Queued | QueuePrimaryAction::None => Sense::hover(),
+            },
+        )
+    });
+
+    let fill = if selected {
+        theme.mix(theme.colors.bg_raised, theme.colors.accent, 0.10)
+    } else {
+        theme.colors.bg_raised
+    };
+    ui.painter().rect_filled(row_rect, CornerRadius::ZERO, fill);
+    ui.painter().rect_stroke(
+        row_rect,
+        CornerRadius::ZERO,
+        Stroke::new(
+            1.0,
+            if pointer_inside_row || selected {
+                theme.colors.border_focus
+            } else {
+                theme.colors.border
+            },
+        ),
+        StrokeKind::Middle,
+    );
+
+    let icon_rect = Rect::from_min_size(
+        pos2(row_rect.left() + 10.0, row_rect.top() + 10.0),
+        vec2(42.0, 42.0),
+    );
+    ui.painter()
+        .rect_filled(icon_rect, CornerRadius::ZERO, theme.colors.bg_base);
+    ui.painter().rect_stroke(
+        icon_rect,
+        CornerRadius::ZERO,
+        Stroke::new(1.0, theme.colors.border),
+        StrokeKind::Middle,
+    );
+    ui.painter().text(
+        icon_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        icons::PLAY,
+        icons::font_id(14.0),
+        theme.colors.fg_muted,
+    );
+
+    let text_left = row_rect.left() + 10.0 + 42.0 + 8.0;
+    let text_right = if let Some(rect) = primary_rect {
+        rect.left() - 6.0
+    } else if show_delete_button {
+        delete_rect.left() - 4.0
+    } else {
+        row_rect.right() - 10.0
+    };
+    let text_width = (text_right - text_left).max(0.0);
+    let mut text_top = row_rect.top() + 10.0;
+
+    let name_galley = ui.painter().layout_no_wrap(
+        truncate_filename(&item.file_name, 26),
+        egui::FontId::proportional(12.0),
+        theme.colors.fg,
+    );
+    ui.painter()
+        .galley(pos2(text_left, text_top), name_galley, theme.colors.fg);
+    text_top += 16.0;
+
+    match &item.state {
+        AudioCompressionState::Analyzing => {
+            let galley = ui.painter().layout_no_wrap(
+                "Analyzing...".to_owned(),
+                egui::FontId::proportional(10.0),
+                theme.colors.fg_muted,
+            );
+            ui.painter()
+                .galley(pos2(text_left, text_top), galley, theme.colors.fg_muted);
+        }
+        AudioCompressionState::Ready => {
+            if let Some(metadata) = &item.metadata {
+                let info = format!(
+                    "{} | {} | {}",
+                    format_bytes(metadata.size_bytes),
+                    format_duration(metadata.duration_secs),
+                    format_audio_channels(metadata.channels),
+                );
+                let galley = ui.painter().layout(
+                    info,
+                    egui::FontId::proportional(10.0),
+                    theme.colors.fg_dim,
+                    text_width,
+                );
+                ui.painter()
+                    .galley(pos2(text_left, text_top), galley, theme.colors.fg_dim);
+            } else {
+                let galley = ui.painter().layout_no_wrap(
+                    "Ready".to_owned(),
+                    egui::FontId::proportional(10.0),
+                    theme.colors.fg_muted,
+                );
+                ui.painter()
+                    .galley(pos2(text_left, text_top), galley, theme.colors.fg_muted);
+            }
+        }
+        AudioCompressionState::Compressing(progress) => {
+            let galley = ui.painter().layout_no_wrap(
+                format!("Compressing {:.0}%", progress.progress * 100.0),
+                egui::FontId::proportional(10.0),
+                theme.colors.accent,
+            );
+            ui.painter()
+                .galley(pos2(text_left, text_top), galley, theme.colors.accent);
+            text_top += 12.0;
+            let bar_rect =
+                Rect::from_min_size(pos2(text_left, text_top), vec2(text_width.max(20.0), 4.0));
+            ui.painter()
+                .rect_filled(bar_rect, CornerRadius::same(2), theme.colors.bg_base);
+            if progress.progress > 0.0 {
+                let fill_rect = Rect::from_min_size(
+                    bar_rect.min,
+                    vec2(bar_rect.width() * progress.progress.clamp(0.0, 1.0), 4.0),
+                );
+                ui.painter()
+                    .rect_filled(fill_rect, CornerRadius::same(2), theme.colors.accent);
+            }
+        }
+        AudioCompressionState::Completed(result) => {
+            let text = format!(
+                "Done, {} -> {} ({:.1}%)",
+                format_bytes(result.original_size_bytes),
+                format_bytes(result.output_size_bytes),
+                result.reduction_percent.abs(),
+            );
+            let galley = ui.painter().layout(
+                text,
+                egui::FontId::proportional(10.0),
+                theme.colors.positive,
+                text_width,
+            );
+            ui.painter()
+                .galley(pos2(text_left, text_top), galley, theme.colors.positive);
+        }
+        AudioCompressionState::Skipped(reason) => {
+            let galley = ui.painter().layout(
+                format!("Skipped: {reason}"),
+                egui::FontId::proportional(10.0),
+                theme.colors.caution,
+                text_width,
+            );
+            ui.painter()
+                .galley(pos2(text_left, text_top), galley, theme.colors.caution);
+        }
+        AudioCompressionState::Failed(error) => {
+            let galley = ui.painter().layout(
+                format!("Failed: {error}"),
+                egui::FontId::proportional(10.0),
+                theme.colors.negative,
+                text_width,
+            );
+            ui.painter()
+                .galley(pos2(text_left, text_top), galley, theme.colors.negative);
+        }
+        AudioCompressionState::Cancelled => {
+            let galley = ui.painter().layout_no_wrap(
+                "Cancelled".to_owned(),
+                egui::FontId::proportional(10.0),
+                theme.colors.caution,
+            );
+            ui.painter()
+                .galley(pos2(text_left, text_top), galley, theme.colors.caution);
+        }
+    }
+
+    if let Some(response) = &primary_response {
+        if let Some(rect) = primary_rect {
+            paint_primary_button(ui, theme, rect, response, primary_action);
+            if response.clicked() {
+                match primary_action {
+                    QueuePrimaryAction::StartCompress => action.start_requested = true,
+                    QueuePrimaryAction::Cancel => action.cancel_requested = true,
+                    QueuePrimaryAction::Queued | QueuePrimaryAction::None => {}
+                }
+            }
+        }
+    }
+
+    if let Some(button_response) = &delete_response {
+        if show_delete_button {
+            let animation = ui
+                .ctx()
+                .animate_bool(button_response.id, button_response.hovered());
+            let button_fill = theme.mix(
+                theme.colors.bg_raised,
+                theme.colors.negative,
+                0.10 + animation * 0.15,
+            );
+            ui.painter()
+                .rect_filled(delete_rect, CornerRadius::ZERO, button_fill);
+            ui.painter().rect_stroke(
+                delete_rect,
+                CornerRadius::ZERO,
+                Stroke::new(
+                    1.0,
+                    theme.mix(theme.colors.border, theme.colors.negative, 0.3),
+                ),
+                StrokeKind::Middle,
+            );
+            ui.painter().text(
+                delete_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                icons::TRASH,
+                icons::font_id(13.0),
+                theme.mix(theme.colors.negative, Color32::WHITE, 0.2 + animation * 0.3),
+            );
+            if button_response.clicked() {
+                action.deleted = true;
+            }
+        }
+    }
+
+    if row_response.clicked()
+        && !action.deleted
+        && !action.start_requested
+        && !action.cancel_requested
+    {
+        action.clicked = true;
+    }
+
+    action
+}
+
+fn primary_button_rect(
+    action: QueuePrimaryAction,
+    row_rect: Rect,
+    show_button: bool,
+    show_delete_button: bool,
+) -> Option<Rect> {
+    if !show_button {
+        return None;
+    }
+
+    let width = match action {
+        QueuePrimaryAction::None => return None,
+        QueuePrimaryAction::StartCompress => 24.0,
+        QueuePrimaryAction::Queued => 72.0,
+        QueuePrimaryAction::Cancel => 24.0,
+    };
+
+    let right = if show_delete_button {
+        row_rect.right() - 24.0 - 8.0 - 6.0
+    } else {
+        row_rect.right() - 8.0
+    };
+
+    Some(Rect::from_min_size(
+        pos2(right - width, row_rect.center().y - 12.0),
+        vec2(width, 24.0),
+    ))
+}
+
+fn should_show_primary_button(action: QueuePrimaryAction, row_hovered: bool) -> bool {
+    match action {
+        QueuePrimaryAction::None => false,
+        QueuePrimaryAction::Queued => true,
+        QueuePrimaryAction::StartCompress | QueuePrimaryAction::Cancel => row_hovered,
+    }
+}
+
+fn paint_primary_button(
+    ui: &mut Ui,
+    theme: &AppTheme,
+    rect: Rect,
+    response: &egui::Response,
+    action: QueuePrimaryAction,
+) {
+    let t = ui.ctx().animate_bool(response.id, response.hovered());
+    let (fill, stroke, icon, label, icon_color, text_color) = match action {
+        QueuePrimaryAction::StartCompress => (
+            theme.mix(theme.colors.accent, Color32::WHITE, t * 0.06),
+            Stroke::NONE,
+            Some(icons::PLAY),
+            None,
+            Color32::BLACK,
+            Color32::BLACK,
+        ),
+        QueuePrimaryAction::Queued => (
+            theme.mix(
+                theme.colors.bg_raised,
+                theme.colors.surface_hover,
+                0.20 + t * 0.10,
+            ),
+            Stroke::new(1.0, theme.colors.border),
+            None,
+            Some("Queued"),
+            theme.colors.fg_dim,
+            theme.colors.fg_dim,
+        ),
+        QueuePrimaryAction::Cancel => (
+            theme.mix(theme.colors.surface, theme.colors.caution, 0.14 + t * 0.10),
+            Stroke::new(
+                1.0,
+                theme.mix(theme.colors.border, theme.colors.caution, 0.28),
+            ),
+            Some(icons::CLOSE),
+            None,
+            theme.colors.fg,
+            theme.colors.fg,
+        ),
+        QueuePrimaryAction::None => return,
+    };
+
+    ui.painter().rect_filled(rect, CornerRadius::ZERO, fill);
+    if stroke != Stroke::NONE {
+        ui.painter()
+            .rect_stroke(rect, CornerRadius::ZERO, stroke, StrokeKind::Middle);
+    }
+
+    match (icon, label) {
+        (Some(icon), Some(label)) => {
+            let mut text_x = rect.left() + 8.0;
+            ui.painter().text(
+                pos2(text_x + 5.0, rect.center().y),
+                egui::Align2::CENTER_CENTER,
+                icon,
+                icons::font_id(11.0),
+                icon_color,
+            );
+            text_x += 14.0;
+            ui.painter().text(
+                pos2(text_x, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                label,
+                egui::FontId::proportional(10.5),
+                text_color,
+            );
+        }
+        (Some(icon), None) => {
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                icon,
+                icons::font_id(11.0),
+                icon_color,
+            );
+        }
+        (None, Some(label)) => {
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                label,
+                egui::FontId::proportional(10.5),
+                text_color,
+            );
+        }
+        (None, None) => {}
+    }
+}
+
+pub(super) fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut unit_index = 0_usize;
+    while value >= 1024.0 && unit_index < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit_index += 1;
+    }
+    if unit_index == 0 {
+        format!("{} {}", bytes, UNITS[unit_index])
+    } else {
+        format!("{value:.1} {}", UNITS[unit_index])
+    }
+}
+
+pub(super) fn format_duration(seconds: f32) -> String {
+    let seconds = seconds.max(0.0).round() as u64;
+    let hours = seconds / 3600;
+    let minutes = (seconds % 3600) / 60;
+    let secs = seconds % 60;
+    if hours > 0 {
+        format!("{hours}h {minutes}m")
+    } else if minutes > 0 {
+        format!("{minutes}m {secs}s")
+    } else {
+        format!("{secs}s")
+    }
+}

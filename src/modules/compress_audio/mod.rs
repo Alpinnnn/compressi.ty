@@ -2,13 +2,13 @@ mod logic;
 pub mod models;
 mod ui;
 
-use std::{path::PathBuf, sync::mpsc, time::Duration};
+use std::{collections::HashSet, path::PathBuf, sync::mpsc, time::Duration};
 
 use crate::{
     modules::{
         compress_audio::{
             logic::{AudioBatchEvent, AudioBatchHandle, AudioBatchItem},
-            models::{AudioAnalysis, AudioCompressionSettings, AudioMetadata, AudioQueueItem},
+            models::{AudioAnalysis, AudioMetadata, AudioQueueItem},
         },
         compress_videos::engine::VideoEngineController,
     },
@@ -17,7 +17,7 @@ use crate::{
 
 use self::{
     logic::{analyze_audio, probe_audio, start_audio_batch},
-    models::{AudioCompressionState, AudioProcessingProgress},
+    models::{AudioCompressionSettings, AudioCompressionState, AudioProcessingProgress},
 };
 
 pub(crate) use self::logic::is_supported_audio_path;
@@ -27,9 +27,9 @@ pub struct CompressAudioPage {
     queue: Vec<AudioQueueItem>,
     next_id: u64,
     selected_id: Option<u64>,
-    settings: AudioCompressionSettings,
 
     active_batch: Option<AudioBatchHandle>,
+    pending_compression_ids: Vec<u64>,
     pending_probes: Vec<PendingProbe>,
     deferred_paths: Vec<PathBuf>,
 
@@ -38,11 +38,13 @@ pub struct CompressAudioPage {
     last_output_dir: Option<PathBuf>,
 
     banner: Option<BannerMessage>,
+    show_cancel_all_confirm: bool,
 }
 
 struct PendingProbe {
     id: u64,
     receiver: mpsc::Receiver<Result<ProbeResult, String>>,
+    encoders: crate::modules::compress_videos::models::EncoderAvailability,
 }
 
 struct ProbeResult {
@@ -65,16 +67,17 @@ impl Default for CompressAudioPage {
     fn default() -> Self {
         Self {
             queue: Vec::new(),
-            next_id: 1,
+            next_id: 0,
             selected_id: None,
-            settings: AudioCompressionSettings::default(),
             active_batch: None,
+            pending_compression_ids: Vec::new(),
             pending_probes: Vec::new(),
             deferred_paths: Vec::new(),
             output_dir: None,
             output_dir_user_set: false,
             last_output_dir: None,
             banner: None,
+            show_cancel_all_confirm: false,
         }
     }
 }
@@ -90,32 +93,84 @@ impl CompressAudioPage {
     }
 
     /// Polls background analysis and compression workers, returning the preferred repaint cadence.
-    pub fn poll_background(&mut self) -> Option<Duration> {
-        let mut probe_updates = Vec::new();
-        let mut completed_probes = Vec::new();
+    pub fn poll_background(&mut self, engine: &mut VideoEngineController) -> Option<Duration> {
+        self.flush_deferred_paths(engine);
+        self.poll_probes();
+        self.poll_batch();
+        if !self.pending_compression_ids.is_empty()
+            && engine.active_info().is_none()
+            && !engine.is_busy()
+        {
+            engine.ensure_ready();
+        }
+        self.start_next_scheduled_audio(engine);
+
+        let busy = !self.pending_probes.is_empty()
+            || self.active_batch.is_some()
+            || !self.pending_compression_ids.is_empty();
+        if busy {
+            Some(Duration::from_millis(50))
+        } else {
+            None
+        }
+    }
+
+    /// Returns whether an audio compression batch is currently running or queued.
+    pub fn is_compressing(&self) -> bool {
+        self.active_batch.is_some() || !self.pending_compression_ids.is_empty()
+    }
+
+    /// Requests cancellation of the active audio compression batch and queued follow-up jobs.
+    pub fn cancel_compression(&mut self) {
+        let pending_ids = std::mem::take(&mut self.pending_compression_ids);
+        for id in pending_ids {
+            if let Some(item) = self.find_item_mut(id)
+                && matches!(&item.state, AudioCompressionState::Ready)
+            {
+                item.state = AudioCompressionState::Cancelled;
+            }
+        }
+
+        if let Some(active_batch) = &self.active_batch {
+            active_batch.cancel();
+        }
+    }
+
+    /// Cancels only the currently active audio job without clearing the queued follow-up jobs.
+    pub fn cancel_active_audio(&self) {
+        if let Some(active_batch) = &self.active_batch {
+            active_batch.cancel();
+        }
+    }
+
+    fn poll_probes(&mut self) {
+        let mut completed = Vec::new();
         for (index, pending_probe) in self.pending_probes.iter().enumerate() {
             match pending_probe.receiver.try_recv() {
-                Ok(result) => {
-                    probe_updates.push((pending_probe.id, result));
-                    completed_probes.push(index);
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    probe_updates.push((
-                        pending_probe.id,
-                        Err("Audio analysis stopped unexpectedly.".to_owned()),
-                    ));
-                    completed_probes.push(index);
-                }
+                Ok(result) => completed.push((
+                    index,
+                    pending_probe.id,
+                    pending_probe.encoders.clone(),
+                    result,
+                )),
+                Err(mpsc::TryRecvError::Disconnected) => completed.push((
+                    index,
+                    pending_probe.id,
+                    pending_probe.encoders.clone(),
+                    Err("Audio analysis stopped unexpectedly.".to_owned()),
+                )),
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
 
-        for (id, result) in probe_updates {
+        for (index, id, encoders, result) in completed.into_iter().rev() {
+            self.pending_probes.remove(index);
             match result {
                 Ok(probe_result) => {
                     if let Some(item) = self.find_item_mut(id) {
                         item.metadata = Some(probe_result.metadata);
                         item.analysis = Some(probe_result.analysis);
+                        item.settings = Some(AudioCompressionSettings::new(&encoders));
                         item.state = AudioCompressionState::Ready;
                     }
                 }
@@ -126,17 +181,16 @@ impl CompressAudioPage {
                 }
             }
         }
+    }
 
-        for index in completed_probes.into_iter().rev() {
-            self.pending_probes.swap_remove(index);
-        }
-
-        let mut batch_finished = None;
-        let mut batch_output_dir = None;
+    fn poll_batch(&mut self) {
+        let mut finished = None;
+        let mut batch_item_ids = Vec::new();
+        let mut clear_selected_id = false;
         let mut batch_events = Vec::new();
-        if let Some(active_batch) = &self.active_batch {
-            batch_output_dir = Some(active_batch.output_dir.clone());
-            while let Ok(event) = active_batch.receiver.try_recv() {
+        if let Some(batch) = &self.active_batch {
+            batch_item_ids = batch.item_ids.clone();
+            while let Ok(event) = batch.receiver.try_recv() {
                 batch_events.push(event);
             }
         }
@@ -146,11 +200,14 @@ impl CompressAudioPage {
                 AudioBatchEvent::ItemStarted { id } => {
                     if let Some(item) = self.find_item_mut(id) {
                         item.state = AudioCompressionState::Compressing(AudioProcessingProgress {
-                            progress: 0.0,
+                            progress: 0.02,
                             stage: "Starting".to_owned(),
                             speed_x: 0.0,
                             eta_secs: None,
                         });
+                    }
+                    if self.selected_id == Some(id) {
+                        clear_selected_id = true;
                     }
                 }
                 AudioBatchEvent::ItemProgress { id, progress } => {
@@ -162,10 +219,16 @@ impl CompressAudioPage {
                     if let Some(item) = self.find_item_mut(id) {
                         item.state = AudioCompressionState::Completed(result);
                     }
+                    if self.selected_id == Some(id) {
+                        clear_selected_id = true;
+                    }
                 }
                 AudioBatchEvent::ItemSkipped { id, reason } => {
                     if let Some(item) = self.find_item_mut(id) {
                         item.state = AudioCompressionState::Skipped(reason);
+                    }
+                    if self.selected_id == Some(id) {
+                        clear_selected_id = true;
                     }
                 }
                 AudioBatchEvent::ItemFailed { id, error } => {
@@ -174,49 +237,44 @@ impl CompressAudioPage {
                     }
                 }
                 AudioBatchEvent::BatchFinished { cancelled } => {
-                    batch_finished = Some(cancelled);
+                    finished = Some(cancelled);
                 }
             }
         }
 
-        if let Some(cancelled) = batch_finished {
+        if clear_selected_id {
+            self.selected_id = None;
+        }
+
+        if let Some(cancelled) = finished {
             if cancelled {
                 for item in &mut self.queue {
-                    if matches!(item.state, AudioCompressionState::Compressing(_)) {
+                    if batch_item_ids.contains(&item.id)
+                        && matches!(
+                            item.state,
+                            AudioCompressionState::Ready | AudioCompressionState::Compressing(_)
+                        )
+                    {
                         item.state = AudioCompressionState::Cancelled;
                     }
                 }
                 self.banner = Some(BannerMessage {
                     tone: BannerTone::Info,
-                    text: "Audio compression cancelled.".to_owned(),
+                    text: "Compression cancelled for the current audio.".to_owned(),
                 });
-            } else {
+            } else if self.pending_compression_ids.is_empty() {
+                let completed_count = self
+                    .queue
+                    .iter()
+                    .filter(|item| matches!(&item.state, AudioCompressionState::Completed(_)))
+                    .count();
                 self.banner = Some(BannerMessage {
                     tone: BannerTone::Success,
-                    text: "Audio compression finished.".to_owned(),
+                    text: format!("Done - {completed_count} audio file(s) compressed."),
                 });
             }
 
-            self.last_output_dir = batch_output_dir;
             self.active_batch = None;
-        }
-
-        if self.active_batch.is_some() || !self.pending_probes.is_empty() {
-            Some(Duration::from_millis(50))
-        } else {
-            None
-        }
-    }
-
-    /// Returns whether an audio compression batch is currently running.
-    pub fn is_compressing(&self) -> bool {
-        self.active_batch.is_some()
-    }
-
-    /// Requests cancellation of the active audio compression batch, if one exists.
-    pub fn cancel_compression(&mut self) {
-        if let Some(active_batch) = &self.active_batch {
-            active_batch.cancel();
         }
     }
 
@@ -234,7 +292,7 @@ impl CompressAudioPage {
             .queue
             .iter()
             .map(|item| item.source_path.clone())
-            .collect::<std::collections::BTreeSet<_>>();
+            .collect::<HashSet<_>>();
         let fresh_paths = audio_paths
             .into_iter()
             .filter(|path| !existing.contains(path))
@@ -250,6 +308,10 @@ impl CompressAudioPage {
 
         if let Some(engine_info) = engine.active_info().cloned() {
             self.enqueue_paths(fresh_paths, engine_info);
+            self.banner = Some(BannerMessage {
+                tone: BannerTone::Info,
+                text: "Added audio files to the queue.".to_owned(),
+            });
         } else {
             self.deferred_paths.extend(fresh_paths);
             engine.ensure_ready();
@@ -302,11 +364,13 @@ impl CompressAudioPage {
                 file_name,
                 metadata: None,
                 analysis: None,
+                settings: None,
                 state: AudioCompressionState::Analyzing,
             });
 
             let (sender, receiver) = mpsc::channel();
             let probe_engine = engine_info.clone();
+            let encoders = probe_engine.encoders.clone();
             std::thread::spawn(move || {
                 let result = probe_audio(&probe_engine, path).map(|metadata| ProbeResult {
                     analysis: analyze_audio(&metadata, &probe_engine.encoders),
@@ -315,103 +379,205 @@ impl CompressAudioPage {
                 let _ = sender.send(result);
             });
 
-            self.pending_probes.push(PendingProbe { id, receiver });
-            if self.selected_id.is_none() {
-                self.selected_id = Some(id);
-            }
+            self.pending_probes.push(PendingProbe {
+                id,
+                receiver,
+                encoders,
+            });
         }
     }
 
-    fn start_compression(&mut self, engine: &mut VideoEngineController) {
+    pub(in crate::modules::compress_audio) fn start_batch_compression(
+        &mut self,
+        engine: &VideoEngineController,
+    ) {
+        let scheduled_count = self.schedule_ready_audios();
+        if scheduled_count == 0 && self.active_batch.is_none() {
+            self.banner = Some(BannerMessage {
+                tone: BannerTone::Info,
+                text: "No audio files ready to compress.".to_owned(),
+            });
+            return;
+        }
+
+        self.start_next_scheduled_audio(engine);
+
+        if scheduled_count > 0 {
+            self.banner = Some(BannerMessage {
+                tone: BannerTone::Info,
+                text: if self.active_batch.is_some() {
+                    format!("{scheduled_count} audio file(s) added to the compression queue.")
+                } else {
+                    format!("{scheduled_count} audio file(s) scheduled for compression.")
+                },
+            });
+        }
+    }
+
+    pub(in crate::modules::compress_audio) fn start_single_compression(
+        &mut self,
+        id: u64,
+        engine: &VideoEngineController,
+    ) {
+        if !self.schedule_audio(id) {
+            self.banner = Some(BannerMessage {
+                tone: BannerTone::Info,
+                text: "Audio is already queued for compression.".to_owned(),
+            });
+            return;
+        }
+
+        self.start_next_scheduled_audio(engine);
+        self.banner = Some(BannerMessage {
+            tone: BannerTone::Info,
+            text: "Audio added to the compression queue.".to_owned(),
+        });
+    }
+
+    fn schedule_ready_audios(&mut self) -> usize {
+        let ids = self
+            .queue
+            .iter()
+            .filter(|item| matches!(&item.state, AudioCompressionState::Ready))
+            .map(|item| item.id)
+            .collect::<Vec<_>>();
+        let mut scheduled = 0;
+        for id in ids {
+            if self.schedule_audio(id) {
+                scheduled += 1;
+            }
+        }
+        scheduled
+    }
+
+    fn schedule_audio(&mut self, id: u64) -> bool {
+        let active_contains = self
+            .active_batch
+            .as_ref()
+            .map(|batch| batch.item_ids.contains(&id))
+            .unwrap_or(false);
+        if active_contains || self.pending_compression_ids.contains(&id) {
+            return false;
+        }
+
+        if self
+            .queue
+            .iter()
+            .any(|item| item.id == id && matches!(&item.state, AudioCompressionState::Ready))
+        {
+            self.pending_compression_ids.push(id);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn start_next_scheduled_audio(&mut self, engine: &VideoEngineController) {
         if self.active_batch.is_some() {
             return;
         }
 
         let Some(engine_info) = engine.active_info().cloned() else {
-            engine.ensure_ready();
-            self.banner = Some(BannerMessage {
-                tone: BannerTone::Info,
-                text: "Preparing the FFmpeg engine before compression starts...".to_owned(),
-            });
             return;
         };
 
-        let items = self
-            .queue
-            .iter()
-            .filter_map(|item| match (&item.metadata, &item.state) {
-                (Some(metadata), AudioCompressionState::Ready)
-                | (Some(metadata), AudioCompressionState::Failed(_))
-                | (Some(metadata), AudioCompressionState::Skipped(_))
-                | (Some(metadata), AudioCompressionState::Completed(_))
-                | (Some(metadata), AudioCompressionState::Cancelled) => Some(AudioBatchItem {
-                    id: item.id,
-                    metadata: metadata.clone(),
-                    settings: self.settings.clone(),
-                }),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
+        while let Some(id) = self.pending_compression_ids.first().copied() {
+            let Some(item) = self
+                .queue
+                .iter()
+                .find(|item| item.id == id && matches!(&item.state, AudioCompressionState::Ready))
+                .cloned()
+            else {
+                self.pending_compression_ids.remove(0);
+                continue;
+            };
 
-        if items.is_empty() {
-            self.banner = Some(BannerMessage {
-                tone: BannerTone::Error,
-                text: "Add at least one analyzed audio file before starting compression."
-                    .to_owned(),
-            });
+            let Some(metadata) = item.metadata else {
+                self.pending_compression_ids.remove(0);
+                continue;
+            };
+            let Some(settings) = item.settings else {
+                self.pending_compression_ids.remove(0);
+                continue;
+            };
+
+            let batch_item = AudioBatchItem {
+                id,
+                metadata,
+                settings,
+            };
+            match start_audio_batch(
+                engine_info.clone(),
+                vec![batch_item],
+                self.output_dir.clone(),
+            ) {
+                Ok(handle) => {
+                    self.last_output_dir = Some(handle.output_dir.clone());
+                    self.active_batch = Some(handle);
+                    self.pending_compression_ids.remove(0);
+                }
+                Err(error) => {
+                    self.pending_compression_ids.remove(0);
+                    self.banner = Some(BannerMessage {
+                        tone: BannerTone::Error,
+                        text: error,
+                    });
+                }
+            }
             return;
         }
+    }
 
-        match start_audio_batch(engine_info, items, self.output_dir.clone()) {
-            Ok(batch_handle) => {
-                for item in &mut self.queue {
-                    if batch_handle.item_ids.contains(&item.id) {
-                        item.state = AudioCompressionState::Compressing(AudioProcessingProgress {
-                            progress: 0.0,
-                            stage: "Queued".to_owned(),
-                            speed_x: 0.0,
-                            eta_secs: None,
-                        });
-                    }
-                }
-                self.last_output_dir = Some(batch_handle.output_dir.clone());
-                self.active_batch = Some(batch_handle);
-                self.banner = Some(BannerMessage {
-                    tone: BannerTone::Info,
-                    text: "Audio compression started.".to_owned(),
-                });
-            }
-            Err(error) => {
-                self.banner = Some(BannerMessage {
-                    tone: BannerTone::Error,
-                    text: error,
-                });
-            }
+    pub(in crate::modules::compress_audio) fn request_cancel_all(&mut self) {
+        self.show_cancel_all_confirm = true;
+    }
+
+    pub(in crate::modules::compress_audio) fn confirm_cancel_all(&mut self) {
+        self.show_cancel_all_confirm = false;
+        let had_active_job = self.active_batch.is_some();
+        self.cancel_compression();
+        if !had_active_job {
+            self.banner = Some(BannerMessage {
+                tone: BannerTone::Info,
+                text: "All queued compression jobs were cancelled.".to_owned(),
+            });
         }
+    }
+
+    pub(in crate::modules::compress_audio) fn dismiss_cancel_all(&mut self) {
+        self.show_cancel_all_confirm = false;
+    }
+
+    pub(in crate::modules::compress_audio) fn has_pending_compression(&self) -> bool {
+        self.active_batch.is_some() || !self.pending_compression_ids.is_empty()
+    }
+
+    pub(in crate::modules::compress_audio) fn is_audio_pending_compression(&self, id: u64) -> bool {
+        self.pending_compression_ids.contains(&id)
+            || self
+                .active_batch
+                .as_ref()
+                .map(|batch| batch.item_ids.contains(&id))
+                .unwrap_or(false)
+    }
+
+    pub(in crate::modules::compress_audio) fn clear_queue(&mut self) {
+        self.queue.clear();
+        self.pending_probes.clear();
+        self.pending_compression_ids.clear();
+        self.deferred_paths.clear();
+        self.selected_id = None;
+        self.banner = None;
+        self.show_cancel_all_confirm = false;
     }
 
     fn remove_item(&mut self, id: u64) {
         self.queue.retain(|item| item.id != id);
         self.pending_probes.retain(|probe| probe.id != id);
+        self.pending_compression_ids
+            .retain(|pending_id| *pending_id != id);
         if self.selected_id == Some(id) {
-            self.selected_id = self.queue.first().map(|item| item.id);
-        }
-    }
-
-    fn clear_finished(&mut self) {
-        self.queue.retain(|item| {
-            !matches!(
-                item.state,
-                AudioCompressionState::Completed(_)
-                    | AudioCompressionState::Skipped(_)
-                    | AudioCompressionState::Cancelled
-            )
-        });
-        if self
-            .selected_id
-            .is_some_and(|id| self.find_item(id).is_none())
-        {
-            self.selected_id = self.queue.first().map(|item| item.id);
+            self.selected_id = None;
         }
     }
 

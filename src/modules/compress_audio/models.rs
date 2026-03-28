@@ -1,10 +1,32 @@
 use std::path::PathBuf;
 
+use crate::modules::compress_videos::models::EncoderAvailability;
+
 /// Main workflow mode for the audio workspace.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AudioWorkflowMode {
     Auto,
     Manual,
+}
+
+impl AudioWorkflowMode {
+    pub const ALL: [Self; 2] = [Self::Auto, Self::Manual];
+
+    /// Returns the short label shown in the mode selector.
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Auto => "Auto (Recommended)",
+            Self::Manual => "Manual",
+        }
+    }
+
+    /// Returns the helper copy shown under the mode label.
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::Auto => "Let the workspace choose a safe modern codec and bitrate target.",
+            Self::Manual => "Pick the output format and fine tune conversion settings yourself.",
+        }
+    }
 }
 
 /// Smart mode presets focused on the user's goal instead of codec jargon.
@@ -16,6 +38,8 @@ pub enum AudioAutoPreset {
 }
 
 impl AudioAutoPreset {
+    pub const ALL: [Self; 3] = [Self::HighQuality, Self::Balanced, Self::SmallSize];
+
     /// Returns the short user-facing preset label.
     pub fn label(self) -> &'static str {
         match self {
@@ -45,6 +69,8 @@ pub enum AudioFormat {
 }
 
 impl AudioFormat {
+    pub const ALL: [Self; 4] = [Self::Aac, Self::Opus, Self::Mp3, Self::Flac];
+
     /// Returns the short user-facing format label.
     pub fn label(self) -> &'static str {
         match self {
@@ -118,6 +144,26 @@ impl Default for AudioCompressionSettings {
             normalize_volume: false,
             remove_metadata: false,
             convert_format_only: false,
+        }
+    }
+}
+
+impl AudioCompressionSettings {
+    /// Builds the default per-file settings after the audio metadata is ready.
+    pub fn new(encoders: &EncoderAvailability) -> Self {
+        let manual_format = if encoders.supports_aac() {
+            AudioFormat::Aac
+        } else if encoders.supports_opus() {
+            AudioFormat::Opus
+        } else if encoders.supports_mp3() {
+            AudioFormat::Mp3
+        } else {
+            AudioFormat::Flac
+        };
+
+        Self {
+            manual_format,
+            ..Self::default()
         }
     }
 }
@@ -223,5 +269,6 @@ pub struct AudioQueueItem {
     pub file_name: String,
     pub metadata: Option<AudioMetadata>,
     pub analysis: Option<AudioAnalysis>,
+    pub settings: Option<AudioCompressionSettings>,
     pub state: AudioCompressionState,
 }

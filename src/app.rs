@@ -228,7 +228,10 @@ impl eframe::App for CompressityApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_external_launches(ctx);
         Self::request_repaint_if_needed(ctx, self.video_engine.poll());
-        Self::request_repaint_if_needed(ctx, self.compress_audio.poll_background());
+        Self::request_repaint_if_needed(
+            ctx,
+            self.compress_audio.poll_background(&mut self.video_engine),
+        );
         self.apply_pending_launch_import();
         Self::request_repaint_if_needed(ctx, self.compress_photos.poll_background());
         Self::request_repaint_if_needed(
