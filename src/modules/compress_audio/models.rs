@@ -16,6 +16,7 @@ pub enum AudioAutoPreset {
 }
 
 impl AudioAutoPreset {
+    /// Returns the short user-facing preset label.
     pub fn label(self) -> &'static str {
         match self {
             Self::HighQuality => "High Quality",
@@ -24,6 +25,7 @@ impl AudioAutoPreset {
         }
     }
 
+    /// Returns the helper copy shown under the preset selector.
     pub fn detail(self) -> &'static str {
         match self {
             Self::HighQuality => "Keeps more detail while still shrinking the file.",
@@ -43,6 +45,7 @@ pub enum AudioFormat {
 }
 
 impl AudioFormat {
+    /// Returns the short user-facing format label.
     pub fn label(self) -> &'static str {
         match self {
             Self::Mp3 => "MP3",
@@ -52,6 +55,7 @@ impl AudioFormat {
         }
     }
 
+    /// Returns the output file extension used for this format.
     pub fn extension(self) -> &'static str {
         match self {
             Self::Mp3 => "mp3",
@@ -61,6 +65,7 @@ impl AudioFormat {
         }
     }
 
+    /// Returns whether the format preserves audio samples without quality loss.
     pub fn is_lossless(self) -> bool {
         matches!(self, Self::Flac)
     }
@@ -75,6 +80,7 @@ pub enum AudioContentKind {
 }
 
 impl AudioContentKind {
+    /// Returns the short user-facing content label.
     pub fn label(self) -> &'static str {
         match self {
             Self::Voice => "Voice",
@@ -132,6 +138,7 @@ pub struct AudioMetadata {
 }
 
 impl AudioMetadata {
+    /// Returns whether the source is already compressed with a lossy codec.
     pub fn is_lossy(&self) -> bool {
         !self.is_lossless
     }

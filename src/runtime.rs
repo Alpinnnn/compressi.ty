@@ -49,6 +49,7 @@ pub fn default_video_output_root() -> PathBuf {
     default_output_root().join("videos")
 }
 
+/// Returns the default base folder used for generated audio compression outputs.
 pub fn default_audio_output_root() -> PathBuf {
     default_output_root().join("audio")
 }

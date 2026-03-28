@@ -68,6 +68,7 @@ impl AppSettings {
             .or_else(|| self.default_output_folder.clone())
     }
 
+    /// Returns the audio output override, or the shared default output folder when unset.
     pub fn preferred_audio_output_folder(&self) -> Option<PathBuf> {
         self.audio_output_folder
             .clone()

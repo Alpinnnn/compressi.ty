@@ -1,4 +1,4 @@
-pub mod logic;
+mod logic;
 pub mod models;
 mod ui;
 
@@ -16,9 +16,11 @@ use crate::{
 };
 
 use self::{
-    logic::{analyze_audio, is_supported_audio_path, probe_audio, start_audio_batch},
+    logic::{analyze_audio, probe_audio, start_audio_batch},
     models::{AudioCompressionState, AudioProcessingProgress},
 };
+
+pub(crate) use self::logic::is_supported_audio_path;
 
 /// Audio compression workspace state and queue orchestration.
 pub struct CompressAudioPage {
@@ -78,6 +80,7 @@ impl Default for CompressAudioPage {
 }
 
 impl CompressAudioPage {
+    /// Queues audio files supplied by external launch requests or shell integrations.
     pub fn queue_external_paths(
         &mut self,
         paths: Vec<PathBuf>,
@@ -86,6 +89,7 @@ impl CompressAudioPage {
         self.add_paths(paths, engine);
     }
 
+    /// Polls background analysis and compression workers, returning the preferred repaint cadence.
     pub fn poll_background(&mut self) -> Option<Duration> {
         let mut probe_updates = Vec::new();
         let mut completed_probes = Vec::new();
@@ -204,10 +208,12 @@ impl CompressAudioPage {
         }
     }
 
+    /// Returns whether an audio compression batch is currently running.
     pub fn is_compressing(&self) -> bool {
         self.active_batch.is_some()
     }
 
+    /// Requests cancellation of the active audio compression batch, if one exists.
     pub fn cancel_compression(&mut self) {
         if let Some(active_batch) = &self.active_batch {
             active_batch.cancel();

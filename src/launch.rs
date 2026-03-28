@@ -4,8 +4,7 @@ use std::{
 };
 
 use crate::modules::{
-    ModuleKind, compress_audio::logic, compress_photos::models::PhotoFormat,
-    compress_videos::processor,
+    ModuleKind, compress_audio, compress_photos::models::PhotoFormat, compress_videos::processor,
 };
 
 const IPC_MAGIC: &str = "COMPRESSITY_LAUNCH_V1";
@@ -175,7 +174,7 @@ impl LaunchImport {
 }
 
 fn supported_module_for_path(path: &Path) -> Option<ModuleKind> {
-    if logic::is_supported_audio_path(path) {
+    if compress_audio::is_supported_audio_path(path) {
         return Some(ModuleKind::CompressAudio);
     }
 
