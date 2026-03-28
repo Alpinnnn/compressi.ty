@@ -9,10 +9,10 @@ use super::menu_card;
 
 const MAIN_MENU_MODULES: [ModuleKind; 5] = [
     ModuleKind::CompressPhotos,
-    ModuleKind::CompressFiles,
-    ModuleKind::CompressFolder,
     ModuleKind::CompressVideos,
+    ModuleKind::CompressAudio,
     ModuleKind::ArchiveExtract,
+    ModuleKind::CompressDocuments,
 ];
 const GITHUB_URL: &str = "https://github.com/Alpinnnn/compressi.ty";
 const SUPPORT_URL: &str = "https://trakteer.id/euphyfve/tip";

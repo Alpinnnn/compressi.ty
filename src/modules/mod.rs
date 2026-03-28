@@ -1,3 +1,4 @@
+pub mod compress_audio;
 pub mod compress_photos;
 pub mod compress_videos;
 
@@ -5,8 +6,8 @@ use eframe::egui::Color32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModuleKind {
-    CompressFiles,
-    CompressFolder,
+    CompressAudio,
+    CompressDocuments,
     CompressPhotos,
     CompressVideos,
     ArchiveExtract,
@@ -15,8 +16,8 @@ pub enum ModuleKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IconKind {
-    Files,
-    Folder,
+    Audio,
+    Documents,
     Photo,
     Videos,
     Archive,
@@ -34,16 +35,16 @@ pub struct ModuleSpec {
 impl ModuleKind {
     pub fn spec(self) -> ModuleSpec {
         match self {
-            Self::CompressFiles => ModuleSpec {
-                icon: IconKind::Files,
-                title: "Compress Files",
-                detail: "Queue individual files, preview output sizes, and fine tune compression without sending anything to the cloud.",
+            Self::CompressAudio => ModuleSpec {
+                icon: IconKind::Audio,
+                title: "Compress Audio",
+                detail: "Compress music, podcasts, and voice notes with smart defaults, quick batch workflows, and advanced controls when needed.",
                 accent: Color32::from_rgb(208, 208, 204),
             },
-            Self::CompressFolder => ModuleSpec {
-                icon: IconKind::Folder,
-                title: "Compress Folder",
-                detail: "Bundle large folders into lighter, easier-to-share packages with room for custom rules and exclusions.",
+            Self::CompressDocuments => ModuleSpec {
+                icon: IconKind::Documents,
+                title: "Compress Documents",
+                detail: "Optimize PDFs and office documents into smaller, easier-to-send files once the document pipeline is ready.",
                 accent: Color32::from_rgb(196, 196, 192),
             },
             Self::CompressPhotos => ModuleSpec {
@@ -77,8 +78,8 @@ impl ModuleKind {
 impl IconKind {
     pub fn glyph(self) -> char {
         match self {
-            Self::Files => crate::icons::DOCUMENT,
-            Self::Folder => crate::icons::FOLDER,
+            Self::Audio => crate::icons::PLAY,
+            Self::Documents => crate::icons::DOCUMENT,
             Self::Photo => crate::icons::IMAGES,
             Self::Videos => crate::icons::VIDEO,
             Self::Archive => crate::icons::ARCHIVE,

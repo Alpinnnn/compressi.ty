@@ -47,6 +47,13 @@ pub struct EncoderAvailability {
     pub h264: bool,
     pub h265: bool,
     pub av1: bool,
+    pub aac: bool,
+    pub libfdk_aac: bool,
+    pub flac: bool,
+    pub libopus: bool,
+    pub opus: bool,
+    pub libmp3lame: bool,
+    pub libshine: bool,
     pub h264_nvidia: bool,
     pub h265_nvidia: bool,
     pub av1_nvidia: bool,
@@ -125,7 +132,67 @@ impl EncoderAvailability {
             h264: self.h264,
             h265: self.h265,
             av1: self.av1,
+            aac: self.aac,
+            libfdk_aac: self.libfdk_aac,
+            flac: self.flac,
+            libopus: self.libopus,
+            opus: self.opus,
+            libmp3lame: self.libmp3lame,
+            libshine: self.libshine,
             ..Default::default()
+        }
+    }
+
+    /// Returns whether an AAC encoder is available.
+    pub fn supports_aac(&self) -> bool {
+        self.aac || self.libfdk_aac
+    }
+
+    /// Returns whether a FLAC encoder is available.
+    pub fn supports_flac(&self) -> bool {
+        self.flac
+    }
+
+    /// Returns whether an Opus encoder is available.
+    pub fn supports_opus(&self) -> bool {
+        self.libopus || self.opus
+    }
+
+    /// Returns whether an MP3 encoder is available.
+    pub fn supports_mp3(&self) -> bool {
+        self.libmp3lame || self.libshine
+    }
+
+    /// Returns the preferred AAC encoder identifier for FFmpeg.
+    pub fn preferred_aac_encoder_name(&self) -> Option<&'static str> {
+        if self.aac {
+            Some("aac")
+        } else if self.libfdk_aac {
+            Some("libfdk_aac")
+        } else {
+            None
+        }
+    }
+
+    /// Returns the preferred Opus encoder identifier for FFmpeg.
+    pub fn preferred_opus_encoder_name(&self) -> Option<&'static str> {
+        if self.libopus {
+            Some("libopus")
+        } else if self.opus {
+            Some("opus")
+        } else {
+            None
+        }
+    }
+
+    /// Returns the preferred MP3 encoder identifier for FFmpeg.
+    pub fn preferred_mp3_encoder_name(&self) -> Option<&'static str> {
+        if self.libmp3lame {
+            Some("libmp3lame")
+        } else if self.libshine {
+            Some("libshine")
+        } else {
+            None
         }
     }
 }

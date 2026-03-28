@@ -7,6 +7,7 @@ use crate::runtime;
 pub struct AppSettings {
     pub default_output_folder: Option<PathBuf>,
     pub photo_output_folder: Option<PathBuf>,
+    pub audio_output_folder: Option<PathBuf>,
     pub video_output_folder: Option<PathBuf>,
     pub use_hardware_acceleration: bool,
 }
@@ -16,6 +17,7 @@ impl Default for AppSettings {
         Self {
             default_output_folder: None,
             photo_output_folder: None,
+            audio_output_folder: None,
             video_output_folder: None,
             use_hardware_acceleration: true,
         }
@@ -66,11 +68,18 @@ impl AppSettings {
             .or_else(|| self.default_output_folder.clone())
     }
 
+    pub fn preferred_audio_output_folder(&self) -> Option<PathBuf> {
+        self.audio_output_folder
+            .clone()
+            .or_else(|| self.default_output_folder.clone())
+    }
+
     fn to_json(&self) -> Result<String, ()> {
         Ok(format!(
-            "{{\"default_output_folder\":{},\"photo_output_folder\":{},\"video_output_folder\":{},\"use_hardware_acceleration\":{}}}",
+            "{{\"default_output_folder\":{},\"photo_output_folder\":{},\"audio_output_folder\":{},\"video_output_folder\":{},\"use_hardware_acceleration\":{}}}",
             path_to_json_value(self.default_output_folder.as_ref()),
             path_to_json_value(self.photo_output_folder.as_ref()),
+            path_to_json_value(self.audio_output_folder.as_ref()),
             path_to_json_value(self.video_output_folder.as_ref()),
             if self.use_hardware_acceleration {
                 "true"
@@ -90,6 +99,7 @@ impl AppSettings {
         Some(Self {
             default_output_folder: parse_optional_path_field(text, "default_output_folder").ok()?,
             photo_output_folder: parse_optional_path_field(text, "photo_output_folder").ok()?,
+            audio_output_folder: parse_optional_path_field(text, "audio_output_folder").ok()?,
             video_output_folder: parse_optional_path_field(text, "video_output_folder").ok()?,
             use_hardware_acceleration: parse_optional_bool_field(text, "use_hardware_acceleration")
                 .ok()?
@@ -200,6 +210,7 @@ mod tests {
             Some(PathBuf::from(r"C:\Exports"))
         );
         assert_eq!(settings.photo_output_folder, None);
+        assert_eq!(settings.audio_output_folder, None);
         assert_eq!(settings.video_output_folder, None);
         assert!(settings.use_hardware_acceleration);
     }
@@ -209,6 +220,7 @@ mod tests {
         let settings = AppSettings {
             default_output_folder: Some(PathBuf::from(r"C:\Exports")),
             photo_output_folder: Some(PathBuf::from(r"D:\Photos")),
+            audio_output_folder: Some(PathBuf::from(r"F:\Audio")),
             video_output_folder: Some(PathBuf::from(r"E:\Videos")),
             use_hardware_acceleration: false,
         };

@@ -7,6 +7,7 @@ use crate::{
     branding,
     modules::{
         ModuleKind,
+        compress_audio::CompressAudioPage,
         compress_photos::CompressPhotosPage,
         compress_videos::{CompressVideosPage, engine::VideoEngineController},
     },
@@ -18,6 +19,7 @@ use crate::{
 
 pub struct CompressityApp {
     active_module: Option<ModuleKind>,
+    compress_audio: CompressAudioPage,
     compress_photos: CompressPhotosPage,
     compress_videos: CompressVideosPage,
     show_about: bool,
@@ -58,6 +60,7 @@ impl CompressityApp {
 
         Self {
             active_module,
+            compress_audio: CompressAudioPage::default(),
             compress_photos: CompressPhotosPage::default(),
             compress_videos: CompressVideosPage::default(),
             show_about: false,
@@ -90,6 +93,13 @@ impl CompressityApp {
     }
 
     fn apply_pending_launch_import(&mut self) {
+        if self.pending_launch_import.has_audio_paths() && self.video_engine.active_info().is_some()
+        {
+            let audio_paths = self.pending_launch_import.take_audio_paths();
+            self.compress_audio
+                .queue_external_paths(audio_paths, &mut self.video_engine);
+        }
+
         if self.pending_launch_import.has_photo_paths() {
             let photo_paths = self.pending_launch_import.take_photo_paths();
             self.compress_photos.queue_external_paths(photo_paths);
@@ -113,7 +123,10 @@ impl CompressityApp {
             return;
         }
 
-        if self.compress_photos.is_compressing() || self.compress_videos.is_compressing() {
+        if self.compress_audio.is_compressing()
+            || self.compress_photos.is_compressing()
+            || self.compress_videos.is_compressing()
+        {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.show_exit_confirm = true;
         }
@@ -194,6 +207,7 @@ impl CompressityApp {
                         );
 
                         if exit.clicked() {
+                            self.compress_audio.cancel_compression();
                             self.compress_photos.cancel_compression();
                             self.compress_videos.cancel_compression();
                             self.show_exit_confirm = false;
@@ -214,6 +228,7 @@ impl eframe::App for CompressityApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_external_launches(ctx);
         Self::request_repaint_if_needed(ctx, self.video_engine.poll());
+        Self::request_repaint_if_needed(ctx, self.compress_audio.poll_background());
         self.apply_pending_launch_import();
         Self::request_repaint_if_needed(ctx, self.compress_photos.poll_background());
         Self::request_repaint_if_needed(
@@ -225,7 +240,10 @@ impl eframe::App for CompressityApp {
         );
         self.handle_close_request(ctx);
 
-        if !self.compress_photos.is_compressing() && !self.compress_videos.is_compressing() {
+        if !self.compress_audio.is_compressing()
+            && !self.compress_photos.is_compressing()
+            && !self.compress_videos.is_compressing()
+        {
             self.show_exit_confirm = false;
         }
 
@@ -236,6 +254,14 @@ impl eframe::App for CompressityApp {
                 self.theme.paint_background(ui.painter(), rect);
 
                 match self.active_module {
+                    Some(ModuleKind::CompressAudio) => self.compress_audio.show(
+                        ui,
+                        ctx,
+                        &self.theme,
+                        &mut self.active_module,
+                        &self.app_settings,
+                        &mut self.video_engine,
+                    ),
                     Some(ModuleKind::CompressPhotos) => self.compress_photos.show(
                         ui,
                         ctx,

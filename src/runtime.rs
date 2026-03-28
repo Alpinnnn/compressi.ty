@@ -49,6 +49,10 @@ pub fn default_video_output_root() -> PathBuf {
     default_output_root().join("videos")
 }
 
+pub fn default_audio_output_root() -> PathBuf {
+    default_output_root().join("audio")
+}
+
 pub fn collect_matching_paths<F>(paths: Vec<PathBuf>, predicate: F) -> Vec<PathBuf>
 where
     F: Fn(&Path) -> bool,

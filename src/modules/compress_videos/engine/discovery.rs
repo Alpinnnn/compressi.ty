@@ -56,6 +56,13 @@ fn inspect_engine(
     let h264_software = encoders_output.contains(" libx264 ");
     let h265_software = encoders_output.contains(" libx265 ");
     let av1_software = encoders_output.contains(" libsvtav1 ");
+    let aac = encoder_list_contains(&encoders_output, "aac");
+    let libfdk_aac = encoder_list_contains(&encoders_output, "libfdk_aac");
+    let flac = encoder_list_contains(&encoders_output, "flac");
+    let libopus = encoder_list_contains(&encoders_output, "libopus");
+    let opus = encoder_list_contains(&encoders_output, "opus");
+    let libmp3lame = encoder_list_contains(&encoders_output, "libmp3lame");
+    let libshine = encoder_list_contains(&encoders_output, "libshine");
 
     let h264_nvidia = encoder_list_contains(&encoders_output, "h264_nvenc")
         && probe_hardware_encoder(&ffmpeg_path, "h264_nvenc");
@@ -90,6 +97,13 @@ fn inspect_engine(
             h264: h264_software || h264_nvidia || h264_amd || h264_intel_qsv,
             h265: h265_software || h265_nvidia || h265_amd || h265_intel_qsv,
             av1: av1_software || av1_nvidia || av1_amd || av1_intel_qsv,
+            aac,
+            libfdk_aac,
+            flac,
+            libopus,
+            opus,
+            libmp3lame,
+            libshine,
             h264_nvidia,
             h265_nvidia,
             av1_nvidia,

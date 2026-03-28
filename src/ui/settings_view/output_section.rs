@@ -37,7 +37,7 @@ pub(super) fn render_output_settings(ui: &mut Ui, theme: &AppTheme, settings: &m
 
             ui.add_space(14.0);
 
-            egui::CollapsingHeader::new("Photo & Video Overrides")
+            egui::CollapsingHeader::new("Photo, Audio & Video Overrides")
                 .id_salt("settings_output_overrides")
                 .default_open(false)
                 .show(ui, |ui| {
@@ -62,6 +62,30 @@ pub(super) fn render_output_settings(ui: &mut Ui, theme: &AppTheme, settings: &m
                         "Overrides the default output location for Compress Photos. Leave empty to follow Default Output Folder.",
                         &mut settings.photo_output_folder,
                         &photo_fallback,
+                        "Use Default Output Folder",
+                    );
+
+                    ui.add_space(14.0);
+
+                    let audio_fallback = settings
+                        .default_output_folder
+                        .as_ref()
+                        .map(|dir| {
+                            format!("Not set - uses Default Output Folder ({})", dir.display())
+                        })
+                        .unwrap_or_else(|| {
+                            format!(
+                                "Not set - uses {}",
+                                runtime::default_audio_output_root().display()
+                            )
+                        });
+                    render_output_folder_field(
+                        ui,
+                        theme,
+                        "Audio Output Folder",
+                        "Overrides the default output location for Compress Audio. Leave empty to follow Default Output Folder.",
+                        &mut settings.audio_output_folder,
+                        &audio_fallback,
                         "Use Default Output Folder",
                     );
 
