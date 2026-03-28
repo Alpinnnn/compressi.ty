@@ -14,7 +14,6 @@ use super::{
 struct QueueCategory {
     title: &'static str,
     tint: Color32,
-    matches_state: fn(&VideoCompressionState) -> bool,
 }
 
 impl CompressVideosPage {
@@ -53,6 +52,11 @@ impl CompressVideosPage {
         let mut cancel_current_video = false;
         let mut locked_settings_click = false;
         let categories = queue_categories(theme);
+        let mut category_indices: [Vec<usize>; 5] = std::array::from_fn(|_| Vec::new());
+
+        for (index, item) in self.queue.iter().enumerate() {
+            category_indices[queue_category_index(&item.state)].push(index);
+        }
 
         panel::card(theme)
             .inner_margin(egui::Margin::same(14))
@@ -68,14 +72,9 @@ impl CompressVideosPage {
                         flush(ui);
                         ui.set_width(ui.available_width());
 
-                        for category in categories {
-                            let indices: Vec<usize> = self
-                                .queue
-                                .iter()
-                                .enumerate()
-                                .filter(|(_, item)| (category.matches_state)(&item.state))
-                                .map(|(index, _)| index)
-                                .collect();
+                        for (category, indices) in
+                            categories.into_iter().zip(category_indices.iter())
+                        {
                             if indices.is_empty() {
                                 continue;
                             }
@@ -87,7 +86,7 @@ impl CompressVideosPage {
                                 indices.len(),
                                 category.tint,
                             );
-                            for &index in &indices {
+                            for &index in indices {
                                 let item = &self.queue[index];
                                 let settings_editable = is_video_settings_editable(&item.state);
                                 let selected =
@@ -190,50 +189,32 @@ fn queue_categories(theme: &AppTheme) -> [QueueCategory; 5] {
         QueueCategory {
             title: "Probing",
             tint: theme.colors.fg_muted,
-            matches_state: is_probing,
         },
         QueueCategory {
             title: "Queue",
             tint: theme.colors.fg_muted,
-            matches_state: is_ready,
         },
         QueueCategory {
             title: "Progress",
             tint: theme.colors.accent,
-            matches_state: is_processing,
         },
         QueueCategory {
             title: "Done",
             tint: theme.colors.positive,
-            matches_state: is_finished,
         },
         QueueCategory {
             title: "Cancelled",
             tint: theme.colors.caution,
-            matches_state: is_cancelled,
         },
     ]
 }
 
-fn is_probing(state: &VideoCompressionState) -> bool {
-    matches!(state, VideoCompressionState::Probing)
-}
-
-fn is_ready(state: &VideoCompressionState) -> bool {
-    matches!(state, VideoCompressionState::Ready)
-}
-
-fn is_processing(state: &VideoCompressionState) -> bool {
-    matches!(state, VideoCompressionState::Compressing(_))
-}
-
-fn is_finished(state: &VideoCompressionState) -> bool {
-    matches!(
-        state,
-        VideoCompressionState::Completed(_) | VideoCompressionState::Failed(_)
-    )
-}
-
-fn is_cancelled(state: &VideoCompressionState) -> bool {
-    matches!(state, VideoCompressionState::Cancelled)
+fn queue_category_index(state: &VideoCompressionState) -> usize {
+    match state {
+        VideoCompressionState::Probing => 0,
+        VideoCompressionState::Ready => 1,
+        VideoCompressionState::Compressing(_) => 2,
+        VideoCompressionState::Completed(_) | VideoCompressionState::Failed(_) => 3,
+        VideoCompressionState::Cancelled => 4,
+    }
 }

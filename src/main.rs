@@ -3,6 +3,8 @@
     windows_subsystem = "windows"
 )]
 
+use std::sync::Arc;
+
 mod app;
 mod branding;
 mod icons;
@@ -14,7 +16,7 @@ mod single_instance;
 mod theme;
 mod ui;
 
-use eframe::egui;
+use eframe::{egui, egui_wgpu, wgpu};
 
 fn main() -> eframe::Result<()> {
     let launch_import = launch::LaunchImport::collect_from_command_line();
@@ -37,10 +39,7 @@ fn main() -> eframe::Result<()> {
         viewport = viewport.with_icon(icon);
     }
 
-    let options = eframe::NativeOptions {
-        viewport,
-        ..Default::default()
-    };
+    let options = build_native_options(viewport);
 
     eframe::run_native(
         "Compressi.ty",
@@ -53,4 +52,23 @@ fn main() -> eframe::Result<()> {
             )))
         }),
     )
+}
+
+fn build_native_options(viewport: egui::ViewportBuilder) -> eframe::NativeOptions {
+    let mut wgpu_options = egui_wgpu::WgpuConfiguration::default();
+    wgpu_options.present_mode = wgpu::PresentMode::AutoVsync;
+    wgpu_options.desired_maximum_frame_latency = Some(1);
+    wgpu_options.on_surface_error = Arc::new(|error| match error {
+        wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated => {
+            egui_wgpu::SurfaceErrorAction::RecreateSurface
+        }
+        _ => egui_wgpu::SurfaceErrorAction::SkipFrame,
+    });
+
+    eframe::NativeOptions {
+        viewport,
+        renderer: eframe::Renderer::Wgpu,
+        wgpu_options,
+        ..Default::default()
+    }
 }

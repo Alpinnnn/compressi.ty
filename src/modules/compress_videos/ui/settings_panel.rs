@@ -45,17 +45,14 @@ impl CompressVideosPage {
                     return;
                 };
 
-                let Some(item) = self
-                    .queue
-                    .iter()
-                    .find(|item| item.id == selected_id)
-                    .cloned()
+                let Some(selected_index) =
+                    self.queue.iter().position(|item| item.id == selected_id)
                 else {
                     render_settings_message(ui, theme, height, "Select a video from the queue.");
                     return;
                 };
 
-                if !is_video_settings_editable(&item.state) {
+                if !is_video_settings_editable(&self.queue[selected_index].state) {
                     self.selected_id = None;
                     render_settings_message(
                         ui,
@@ -66,24 +63,30 @@ impl CompressVideosPage {
                     return;
                 }
 
-                let Some(metadata) = item.metadata.clone() else {
-                    render_settings_message(
-                        ui,
-                        theme,
-                        height,
-                        "Settings will be available after the video finishes probing.",
-                    );
-                    return;
+                let (file_name, metadata, mut settings) = {
+                    let item = &self.queue[selected_index];
+                    let Some(metadata) = item.metadata.clone() else {
+                        render_settings_message(
+                            ui,
+                            theme,
+                            height,
+                            "Settings will be available after the video finishes probing.",
+                        );
+                        return;
+                    };
+                    let Some(settings) = item.settings.clone() else {
+                        render_settings_message(
+                            ui,
+                            theme,
+                            height,
+                            "Settings will be available after the video finishes probing.",
+                        );
+                        return;
+                    };
+
+                    (item.file_name.clone(), metadata, settings)
                 };
-                let Some(mut settings) = item.settings.clone() else {
-                    render_settings_message(
-                        ui,
-                        theme,
-                        height,
-                        "Settings will be available after the video finishes probing.",
-                    );
-                    return;
-                };
+
                 let encoders = engine
                     .active_info()
                     .map(|info| {
@@ -92,7 +95,7 @@ impl CompressVideosPage {
                     })
                     .unwrap_or_default();
 
-                render_settings_header(ui, theme, &item.file_name, &metadata);
+                render_settings_header(ui, theme, &file_name, &metadata);
 
                 ScrollArea::vertical()
                     .id_salt("video_settings_scroll")
@@ -131,11 +134,7 @@ impl CompressVideosPage {
                         }
                     });
 
-                if let Some(queue_item) = self
-                    .queue
-                    .iter_mut()
-                    .find(|queue_item| queue_item.id == selected_id)
-                {
+                if let Some(queue_item) = self.queue.get_mut(selected_index) {
                     queue_item.settings = Some(settings);
                 }
             });

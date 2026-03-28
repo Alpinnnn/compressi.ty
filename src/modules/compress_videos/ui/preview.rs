@@ -55,11 +55,8 @@ impl CompressVideosPage {
                     return;
                 };
 
-                let Some(item) = self
-                    .queue
-                    .iter()
-                    .find(|item| item.id == selected_id)
-                    .cloned()
+                let Some(selected_index) =
+                    self.queue.iter().position(|item| item.id == selected_id)
                 else {
                     self.selected_id = None;
                     self.reset_preview_state();
@@ -72,7 +69,9 @@ impl CompressVideosPage {
                     return;
                 };
 
-                let metadata_line = item
+                let file_name_display =
+                    truncate_filename(&self.queue[selected_index].file_name, 36);
+                let metadata_line = self.queue[selected_index]
                     .metadata
                     .as_ref()
                     .map(|metadata| {
@@ -93,7 +92,7 @@ impl CompressVideosPage {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
                         ui.label(
-                            RichText::new(truncate_filename(&item.file_name, 36))
+                            RichText::new(file_name_display)
                                 .size(12.0)
                                 .strong()
                                 .color(theme.colors.fg),
@@ -138,11 +137,11 @@ impl CompressVideosPage {
                     StrokeKind::Middle,
                 );
 
-                self.ensure_thumbnail_texture(ctx, &item, selected_id);
-                let active_texture = self.preview_texture.as_ref().cloned();
-                let fallback_texture = self.thumbnail_textures.get(&selected_id).cloned();
+                self.ensure_thumbnail_texture(ctx, selected_index, selected_id);
+                let active_texture = self.preview_texture.as_ref();
+                let fallback_texture = self.thumbnail_textures.get(&selected_id);
 
-                if let Some(texture) = active_texture.as_ref().or(fallback_texture.as_ref()) {
+                if let Some(texture) = active_texture.or(fallback_texture) {
                     paint_centered_texture(ui, player_rect, texture);
                 } else {
                     ui.painter().text(
@@ -158,7 +157,7 @@ impl CompressVideosPage {
                     ui,
                     theme,
                     player_rect,
-                    &item.state,
+                    &self.queue[selected_index].state,
                     self.preview_state.is_loading,
                     self.preview_state.load_error.as_deref(),
                     active_texture.is_some(),
@@ -372,23 +371,26 @@ impl CompressVideosPage {
         self.preview_texture_dirty = false;
     }
 
-    fn ensure_thumbnail_texture(
-        &mut self,
-        ctx: &egui::Context,
-        item: &crate::modules::compress_videos::models::VideoQueueItem,
-        item_id: u64,
-    ) {
+    fn ensure_thumbnail_texture(&mut self, ctx: &egui::Context, item_index: usize, item_id: u64) {
         if self.thumbnail_textures.contains_key(&item_id) {
             return;
         }
-        let Some(thumbnail) = item.thumbnail.as_ref() else {
-            return;
+
+        let color_image = {
+            let Some(thumbnail) = self
+                .queue
+                .get(item_index)
+                .and_then(|item| item.thumbnail.as_ref())
+            else {
+                return;
+            };
+
+            ColorImage::from_rgba_unmultiplied(
+                [thumbnail.width as usize, thumbnail.height as usize],
+                &thumbnail.rgba,
+            )
         };
 
-        let color_image = ColorImage::from_rgba_unmultiplied(
-            [thumbnail.width as usize, thumbnail.height as usize],
-            &thumbnail.rgba,
-        );
         let texture = ctx.load_texture(
             format!("video-thumb-{item_id}"),
             color_image,
