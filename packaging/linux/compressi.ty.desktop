@@ -5,5 +5,5 @@ Comment=AI-generated desktop compression toolkit
 Exec=compressity
 Icon=compressi.ty
 Terminal=false
-Categories=Utility;Graphics;AudioVideo;
+Categories=Utility;FileTools;
 StartupNotify=true

@@ -135,6 +135,7 @@ rm -rf "${APPDIR}"
 mkdir -p \
   "${APPDIR}/usr/bin" \
   "${APPDIR}/usr/share/applications" \
+  "${APPDIR}/usr/share/metainfo" \
   "${APPDIR}/usr/share/icons/hicolor/scalable/apps"
 
 cp "${REPO_ROOT}/target/release/compressity" "${APPDIR}/usr/bin/compressity"
@@ -142,6 +143,7 @@ cp "${REPO_ROOT}/LICENSE" "${APPDIR}/LICENSE.txt"
 cp "${SCRIPT_DIR}/AppRun" "${APPDIR}/AppRun"
 cp "${SCRIPT_DIR}/compressi.ty.desktop" "${APPDIR}/compressi.ty.desktop"
 cp "${SCRIPT_DIR}/compressi.ty.desktop" "${APPDIR}/usr/share/applications/compressi.ty.desktop"
+cp "${SCRIPT_DIR}/compressi.ty.appdata.xml" "${APPDIR}/usr/share/metainfo/compressi.ty.appdata.xml"
 cp "${REPO_ROOT}/assets/icon/icon.svg" "${APPDIR}/compressi.ty.svg"
 cp "${REPO_ROOT}/assets/icon/icon.svg" "${APPDIR}/usr/share/icons/hicolor/scalable/apps/compressi.ty.svg"
 chmod +x "${APPDIR}/AppRun" "${APPDIR}/usr/bin/compressity"
