@@ -54,6 +54,7 @@ Requirements:
 - A C toolchain that provides `cc` (`sudo apt update && sudo apt install -y build-essential` on Ubuntu/Debian/WSL)
 - Internet access to download the bundled FFmpeg runtime
 - `appimagetool` if `.AppImage` output is required
+- Run the bundle script as your normal user so Cargo and the build outputs stay in your user environment
 
 Preparation:
 
@@ -85,6 +86,7 @@ Result:
 
 - The packaging scripts include a bundled FFmpeg runtime
 - The Windows build now reuses the cached FFmpeg archive in `dist/windows/engine-cache/`
+- The Linux build reuses the cached FFmpeg archive in `dist/linux/engine-cache/` and automatically redownloads it if extraction fails
 - Use `-RefreshEngine` on the Windows build to fetch the latest bundled runtime
 - The `no-engine` variant skips copying FFmpeg into the package entirely
 - After installation, engine versions can still be checked and updated from Settings

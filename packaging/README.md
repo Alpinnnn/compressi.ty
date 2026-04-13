@@ -53,5 +53,7 @@ Output:
 Notes:
 
 - Run from Linux, WSL, or a Linux CI environment
+- Run the Linux build script as your normal user. Use `sudo` only for installing prerequisite packages.
 - Linux bundle builds also need a C toolchain that provides `cc` (`sudo apt update && sudo apt install -y build-essential` on Ubuntu/Debian/WSL)
+- The Linux build reuses `dist/linux/engine-cache/` and will redownload FFmpeg automatically if the cached archive is incomplete or corrupted
 - `.AppImage` output is generated only when `appimagetool` is available
