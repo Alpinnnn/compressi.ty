@@ -1,16 +1,16 @@
 <p align="center">
-  <img src="assets/icon/icon.svg" alt="Compressity logo" width="96">
+  <img src="assets/icon/icon.svg" alt="Compressi.ty logo" width="96">
 </p>
 
-<h1 align="center">Compressity</h1>
+<h1 align="center">Compressi.ty</h1>
 
 <p align="center">
   Local-first desktop compression toolkit for photos and videos.
 </p>
 
-Compressity is a native desktop application built with Rust and `eframe/egui`. It is designed around on-device processing, modular feature workspaces, and a packaging flow that can ship the video runtime with the app instead of requiring users to install FFmpeg manually.
+Compressi.ty is a native desktop application built with Rust and `eframe/egui`. It is designed around on-device processing, modular feature workspaces, and a packaging flow that can ship the video runtime with the app instead of requiring users to install FFmpeg manually.
 
-## Why Compressity
+## Why Compressi.ty
 
 - Local-first by default. Compression runs on the user's machine with no cloud dependency.
 - Native desktop UI. The application ships as a Rust desktop app with custom theming, fonts, and branding assets.
@@ -40,7 +40,7 @@ Compressity is a native desktop application built with Rust and `eframe/egui`. I
 - Output options: keep original format or convert to `JPEG`, `WebP`, or `AVIF`
 - Before/after preview workspace with zoom, pan, and draggable split comparison
 - Background processing with per-file progress reporting and cancellation
-- Auto-generated run folders under `compressity-output/photos/` when no custom destination is selected
+- Auto-generated run folders under `compressi.ty-output/photos/` when no custom destination is selected
 
 ### Compress Videos
 
@@ -57,7 +57,7 @@ Compressity is a native desktop application built with Rust and `eframe/egui`. I
 
 ## Architecture
 
-Compressity is organized around a shared application shell plus feature-specific modules.
+Compressi.ty is organized around a shared application shell plus feature-specific modules.
 
 ```text
 src/
@@ -89,12 +89,12 @@ The repository already follows a clear split that is easy to extend:
 
 ## Runtime Behavior
 
-- Global settings are persisted as `compressity/settings.json` inside the user's config directory
-- If no default output folder is configured, Compressity resolves an output root in this order:
+- Global settings are persisted as `compressi.ty/settings.json` inside the user's config directory
+- If no default output folder is configured, Compressi.ty resolves an output root in this order:
   `Downloads -> Pictures -> Documents -> Home -> temp fallback`
 - Default generated output folders:
-  - Photos: `compressity-output/photos/run-<timestamp>/`
-  - Videos: `compressity-output/videos/run-<timestamp>/`
+  - Photos: `compressi.ty-output/photos/run-<timestamp>/`
+  - Videos: `compressi.ty-output/videos/run-<timestamp>/`
 - Managed FFmpeg updates are stored in local app data so installed application folders can remain read-only
 
 ## Getting Started
@@ -105,7 +105,7 @@ The repository already follows a clear split that is easy to extend:
 - Internet access if you plan to use video compression from source on a machine without an existing FFmpeg runtime
 - Optional release prerequisites:
   - Windows installer builds: Inno Setup 6
-  - Linux bundles: `bash`, `curl`, `tar`, optional `appimagetool`
+  - Linux bundles: `bash`, `curl`, `tar`, and a C toolchain that provides `cc` (for Ubuntu/Debian/WSL: `sudo apt install build-essential`), optional `appimagetool`
 
 ### Run From Source
 
@@ -150,16 +150,17 @@ powershell -ExecutionPolicy Bypass -File packaging\windows\build-installer.ps1 -
 
 Outputs:
 
-- `dist/windows/Compressity/` for the default bundled variant
-- `dist/windows/Compressity-no-engine/` for the no-engine variant
-- `dist/windows/Compressity-bundled/` as the bundled staging folder when `-Variant all` is used
-- `dist/windows/installer/Compressity-Setup-<version>.exe` for the default bundled installer
-- `dist/windows/installer/Compressity-Setup-<version>-NoEngine.exe` for the no-engine installer
-- `dist/windows/installer/Compressity-Setup-<version>-Bundled.exe` when `-Variant all` is used
+- `dist/windows/Compressi.ty/` for the default bundled variant
+- `dist/windows/Compressi.ty-no-engine/` for the no-engine variant
+- `dist/windows/Compressi.ty-bundled/` as the bundled staging folder when `-Variant all` is used
+- `dist/windows/installer/Compressi.ty-Setup-<version>.exe` for the default bundled installer
+- `dist/windows/installer/Compressi.ty-Setup-<version>-NoEngine.exe` for the no-engine installer
+- `dist/windows/installer/Compressi.ty-Setup-<version>-Bundled.exe` when `-Variant all` is used
 
 ### Linux
 
 ```bash
+sudo apt update && sudo apt install -y build-essential
 chmod +x packaging/linux/build-bundle.sh
 chmod +x packaging/linux/AppRun
 ./packaging/linux/build-bundle.sh
@@ -173,9 +174,9 @@ Optional flag:
 
 Outputs:
 
-- `dist/linux/Compressity.AppDir/`
-- `dist/linux/Compressity-<version>-<arch>.tar.gz`
-- `dist/linux/Compressity-<version>-<arch>.AppImage` when `appimagetool` is available
+- `dist/linux/Compressi.ty.AppDir/`
+- `dist/linux/Compressi.ty-<version>-<arch>.tar.gz`
+- `dist/linux/Compressi.ty-<version>-<arch>.AppImage` when `appimagetool` is available
 
 ## Repository Docs
 
@@ -192,4 +193,4 @@ Outputs:
 
 ## License
 
-This project is distributed under the `Compressity Personal Source-Share Attribution NonCommercial License 1.0`. See [LICENSE](LICENSE).
+This project is distributed under the `Compressi.ty Personal Source-Share Attribution NonCommercial License 1.0`. See [LICENSE](LICENSE).

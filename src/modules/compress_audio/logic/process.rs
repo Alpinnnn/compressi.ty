@@ -87,8 +87,13 @@ pub(super) fn build_encode_command(
     match plan.output_format {
         crate::modules::compress_audio::models::AudioFormat::Aac => {
             command.arg("-profile:a").arg("aac_low");
-            if let Some(target_bitrate_kbps) = plan.target_bitrate_kbps {
+            if let Some(aac_vbr_mode) = plan.aac_vbr_mode {
+                command.arg("-vbr").arg(aac_vbr_mode.to_string());
+            } else if let Some(target_bitrate_kbps) = plan.target_bitrate_kbps {
                 command.arg("-b:a").arg(format!("{target_bitrate_kbps}k"));
+            }
+            if plan.encoder_name == "libfdk_aac" {
+                command.arg("-afterburner").arg("1");
             }
         }
         crate::modules::compress_audio::models::AudioFormat::Opus => {
@@ -106,6 +111,9 @@ pub(super) fn build_encode_command(
         crate::modules::compress_audio::models::AudioFormat::Mp3 => {
             if let Some(target_bitrate_kbps) = plan.target_bitrate_kbps {
                 command.arg("-b:a").arg(format!("{target_bitrate_kbps}k"));
+            }
+            if plan.mp3_use_abr {
+                command.arg("-abr").arg("1");
             }
         }
         crate::modules::compress_audio::models::AudioFormat::Flac => {
@@ -268,4 +276,112 @@ fn read_stream<R: Read>(reader: R) -> String {
     let mut reader = BufReader::new(reader);
     let _ = reader.read_to_string(&mut buffer);
     buffer
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_encode_command;
+    use crate::modules::compress_audio::models::{
+        AudioCompressionPlan, AudioCompressionSettings, AudioContentKind, AudioFormat,
+        AudioMetadata,
+    };
+    use std::{path::Path, process::Command};
+
+    #[test]
+    fn fdk_aac_auto_mode_uses_vbr_and_afterburner() {
+        let metadata = sample_metadata();
+        let settings = AudioCompressionSettings::default();
+        let plan = AudioCompressionPlan {
+            output_format: AudioFormat::Aac,
+            encoder_name: "libfdk_aac",
+            target_bitrate_kbps: Some(128),
+            aac_vbr_mode: Some(4),
+            mp3_use_abr: false,
+            sample_rate_hz: None,
+            channels: None,
+            content_kind: AudioContentKind::Music,
+            warnings: Vec::new(),
+            recommendation: None,
+            estimated_size_bytes: 1_000_000,
+            should_skip: false,
+            skip_reason: None,
+        };
+
+        let command = build_encode_command(
+            Path::new("ffmpeg"),
+            &metadata,
+            &settings,
+            &plan,
+            Path::new("out.m4a"),
+        );
+        let args = command_args(&command);
+
+        assert!(contains_arg_pair(&args, "-vbr", "4"));
+        assert!(contains_arg_pair(&args, "-afterburner", "1"));
+        assert!(!contains_flag(&args, "-b:a"));
+    }
+
+    #[test]
+    fn mp3_lame_uses_abr_for_target_bitrate() {
+        let metadata = sample_metadata();
+        let settings = AudioCompressionSettings::default();
+        let plan = AudioCompressionPlan {
+            output_format: AudioFormat::Mp3,
+            encoder_name: "libmp3lame",
+            target_bitrate_kbps: Some(128),
+            aac_vbr_mode: None,
+            mp3_use_abr: true,
+            sample_rate_hz: None,
+            channels: None,
+            content_kind: AudioContentKind::Music,
+            warnings: Vec::new(),
+            recommendation: None,
+            estimated_size_bytes: 1_000_000,
+            should_skip: false,
+            skip_reason: None,
+        };
+
+        let command = build_encode_command(
+            Path::new("ffmpeg"),
+            &metadata,
+            &settings,
+            &plan,
+            Path::new("out.mp3"),
+        );
+        let args = command_args(&command);
+
+        assert!(contains_arg_pair(&args, "-b:a", "128k"));
+        assert!(contains_arg_pair(&args, "-abr", "1"));
+    }
+
+    fn command_args(command: &Command) -> Vec<String> {
+        command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn contains_flag(args: &[String], flag: &str) -> bool {
+        args.iter().any(|arg| arg == flag)
+    }
+
+    fn contains_arg_pair(args: &[String], key: &str, value: &str) -> bool {
+        args.windows(2)
+            .any(|window| window[0] == key && window[1] == value)
+    }
+
+    fn sample_metadata() -> AudioMetadata {
+        AudioMetadata {
+            path: Path::new("track.wav").to_path_buf(),
+            file_name: "track.wav".to_owned(),
+            size_bytes: 40 * 1_048_576,
+            duration_secs: 240.0,
+            audio_bitrate_kbps: Some(1_411),
+            sample_rate_hz: 44_100,
+            channels: 2,
+            codec_name: "pcm_s16le".to_owned(),
+            container_name: "wav".to_owned(),
+            is_lossless: true,
+        }
+    }
 }

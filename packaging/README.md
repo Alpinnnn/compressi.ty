@@ -12,15 +12,15 @@ packaging\windows\build-installer.ps1
 
 Output:
 
-- `dist/windows/Compressity/`
-- `dist/windows/installer/Compressity-Setup-<version>.exe`
+- `dist/windows/Compressi.ty/`
+- `dist/windows/installer/Compressi.ty-Setup-<version>.exe`
 
 Files:
 
 | File | Purpose |
 |---|---|
 | `build-installer.ps1` | Orchestrates the full build, supports `bundled` and `no-engine` variants, reuses the cached FFmpeg runtime, and invokes Inno Setup |
-| `compressity.iss` | Inno Setup script with `WizardStyle=modern dark`, per-page background switching, and `assets/icon/icon.bmp` as the small wizard badge |
+| `compressi.ty.iss` | Inno Setup script with `WizardStyle=modern dark`, per-page background switching, and `assets/icon/icon.bmp` as the small wizard badge |
 | `installer-bg-welcome.png` | Background artwork for the Welcome page |
 | `installer-bg-license.png` | Background artwork for the License page |
 | `installer-bg-select-dir.png` | Background artwork for the installation directory page |
@@ -46,11 +46,12 @@ packaging/linux/build-bundle.sh
 
 Output:
 
-- `dist/linux/Compressity.AppDir/`
-- `dist/linux/Compressity-<version>-<arch>.tar.gz`
-- `dist/linux/Compressity-<version>-<arch>.AppImage`
+- `dist/linux/Compressi.ty.AppDir/`
+- `dist/linux/Compressi.ty-<version>-<arch>.tar.gz`
+- `dist/linux/Compressi.ty-<version>-<arch>.AppImage`
 
 Notes:
 
 - Run from Linux, WSL, or a Linux CI environment
+- Linux bundle builds also need a C toolchain that provides `cc` (`sudo apt update && sudo apt install -y build-essential` on Ubuntu/Debian/WSL)
 - `.AppImage` output is generated only when `appimagetool` is available

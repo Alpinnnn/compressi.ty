@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=Compressity
+Name=Compressi.ty
 Comment=AI-generated desktop compression toolkit
 Exec=compressity
-Icon=compressity
+Icon=compressi.ty
 Terminal=false
 Categories=Utility;Graphics;AudioVideo;
 StartupNotify=true

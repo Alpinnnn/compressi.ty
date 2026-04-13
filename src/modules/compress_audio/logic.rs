@@ -2,6 +2,7 @@ mod analysis;
 mod batch;
 mod files;
 mod parsing;
+mod playback;
 mod process;
 
 use std::{ffi::OsStr, path::Path};
@@ -9,6 +10,7 @@ use std::{ffi::OsStr, path::Path};
 pub use self::{
     analysis::{analyze_audio, estimate_output},
     batch::{AudioBatchEvent, AudioBatchHandle, AudioBatchItem, start_audio_batch},
+    playback::AudioPreviewPlayer,
     process::probe_audio,
 };
 

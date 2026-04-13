@@ -16,7 +16,7 @@ use crate::{
 };
 
 use self::{
-    logic::{analyze_audio, probe_audio, start_audio_batch},
+    logic::{AudioPreviewPlayer, analyze_audio, probe_audio, start_audio_batch},
     models::{AudioCompressionSettings, AudioCompressionState, AudioProcessingProgress},
 };
 
@@ -39,6 +39,8 @@ pub struct CompressAudioPage {
 
     banner: Option<BannerMessage>,
     show_cancel_all_confirm: bool,
+    preview_player: AudioPreviewPlayer,
+    preview_scrub_position: Option<(u64, f32)>,
 }
 
 struct PendingProbe {
@@ -78,6 +80,8 @@ impl Default for CompressAudioPage {
             last_output_dir: None,
             banner: None,
             show_cancel_all_confirm: false,
+            preview_player: AudioPreviewPlayer::default(),
+            preview_scrub_position: None,
         }
     }
 }
@@ -244,6 +248,8 @@ impl CompressAudioPage {
 
         if clear_selected_id {
             self.selected_id = None;
+            self.preview_player.stop();
+            self.preview_scrub_position = None;
         }
 
         if let Some(cancelled) = finished {
@@ -567,6 +573,8 @@ impl CompressAudioPage {
         self.pending_compression_ids.clear();
         self.deferred_paths.clear();
         self.selected_id = None;
+        self.preview_player.stop();
+        self.preview_scrub_position = None;
         self.banner = None;
         self.show_cancel_all_confirm = false;
     }
@@ -578,6 +586,8 @@ impl CompressAudioPage {
             .retain(|pending_id| *pending_id != id);
         if self.selected_id == Some(id) {
             self.selected_id = None;
+            self.preview_player.stop();
+            self.preview_scrub_position = None;
         }
     }
 

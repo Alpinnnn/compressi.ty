@@ -162,7 +162,7 @@ fn probe_hw_null(ffmpeg_path: &Path, encoder_name: &str) -> bool {
 }
 
 fn probe_hw_tempfile(ffmpeg_path: &Path, encoder_name: &str) -> bool {
-    let temp_dir = std::env::temp_dir().join("compressity").join("gpu-probe");
+    let temp_dir = std::env::temp_dir().join("compressi.ty").join("gpu-probe");
     if fs::create_dir_all(&temp_dir).is_err() {
         return false;
     }

@@ -1,29 +1,29 @@
 ; ============================================================================
-; Compressity Inno Setup installer script
+; Compressi.ty Inno Setup installer script
 ; Branded to match the app's dark shell with static installer artwork
 ; ============================================================================
 
-#define MyAppName "Compressity"
+#define MyAppName "Compressi.ty"
 #ifndef MyAppVersion
   #define MyAppVersion "0.1.0"
 #endif
 #ifndef StageDir
-  #define StageDir "..\..\dist\windows\Compressity"
+  #define StageDir "..\..\dist\windows\Compressi.ty"
 #endif
 
 [Setup]
 AppId={{4B6D5E75-A4E2-47D2-AE2A-1CB29855E7BF}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-AppPublisher=Compressity
+AppPublisher=Compressi.ty
 AppPublisherURL=https://github.com/Alpinnnn/compressi.ty
 AppSupportURL=https://github.com/Alpinnnn/compressi.ty/issues
-DefaultDirName={autopf}\Compressity
-DefaultGroupName=Compressity
+DefaultDirName={autopf}\Compressi.ty
+DefaultGroupName=Compressi.ty
 DisableProgramGroupPage=yes
 LicenseFile=..\..\LICENSE
 OutputDir=..\..\dist\windows\installer
-OutputBaseFilename=Compressity-Setup-{#MyAppVersion}
+OutputBaseFilename=Compressi.ty-Setup-{#MyAppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 ChangesAssociations=yes
@@ -108,17 +108,17 @@ Root: HKCR; Subkey: "SystemFileAssociations\.m4v\shell\Compressity.Open"; ValueT
 Root: HKCR; Subkey: "SystemFileAssociations\.m4v\shell\Compressity.Open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\compressity.exe"" ""%1"""; Flags: uninsdeletekey; Tasks: shellintegration
 
 [Icons]
-Name: "{autoprograms}\Compressity"; Filename: "{app}\compressity.exe"
-Name: "{autodesktop}\Compressity"; Filename: "{app}\compressity.exe"; Tasks: desktopicon
+Name: "{autoprograms}\Compressi.ty"; Filename: "{app}\compressity.exe"
+Name: "{autodesktop}\Compressi.ty"; Filename: "{app}\compressity.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\compressity.exe"; Description: "Launch Compressity"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\compressity.exe"; Description: "Launch Compressi.ty"; Flags: nowait postinstall skipifsilent
 
 [Messages]
-WelcomeLabel1=Welcome to Compressity
-WelcomeLabel2=Setup will install [name/ver] on your computer.%n%nCompressity is a local-first desktop compression toolkit for photos and videos.%n%nClick Next to continue.
+WelcomeLabel1=Welcome to Compressi.ty
+WelcomeLabel2=Setup will install [name/ver] on your computer.%n%nCompressi.ty is a local-first desktop compression toolkit for photos and videos.%n%nClick Next to continue.
 FinishedHeadingLabel=Installation Complete
-FinishedLabel=Compressity has been installed on your computer.%n%nClick Finish to close Setup.
+FinishedLabel=Compressi.ty has been installed on your computer.%n%nClick Finish to close Setup.
 
 [Code]
 // Apply the brand accent to the progress bar at runtime.

@@ -29,9 +29,19 @@ impl AppSettings {
         runtime::config_dir().map(|dir| dir.join("settings.json"))
     }
 
+    fn legacy_config_path() -> Option<PathBuf> {
+        runtime::legacy_config_dir().map(|dir| dir.join("settings.json"))
+    }
+
     /// Load settings from disk. Returns `Default` on any error.
     pub fn load() -> Self {
-        let path = match Self::config_path() {
+        // Prefer the rebranded config path, but keep reading the legacy one
+        // during the transition so existing settings still load.
+        let path = match Self::config_path()
+            .filter(|path| path.exists())
+            .or_else(|| Self::legacy_config_path().filter(|path| path.exists()))
+            .or_else(Self::config_path)
+        {
             Some(p) => p,
             None => return Self::default(),
         };

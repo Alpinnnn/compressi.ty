@@ -7,11 +7,11 @@
 
 ## Output
 
-- Windows staging bundle: `dist/windows/Compressity/`
-- Windows installer: `dist/windows/installer/Compressity-Setup-<version>.exe`
-- Linux AppDir: `dist/linux/Compressity.AppDir/`
-- Linux tarball: `dist/linux/Compressity-<version>-<arch>.tar.gz`
-- Linux AppImage: `dist/linux/Compressity-<version>-<arch>.AppImage`
+- Windows staging bundle: `dist/windows/Compressi.ty/`
+- Windows installer: `dist/windows/installer/Compressi.ty-Setup-<version>.exe`
+- Linux AppDir: `dist/linux/Compressi.ty.AppDir/`
+- Linux tarball: `dist/linux/Compressi.ty-<version>-<arch>.tar.gz`
+- Linux AppImage: `dist/linux/Compressi.ty-<version>-<arch>.AppImage`
 
 ## Windows
 
@@ -38,8 +38,8 @@ powershell -ExecutionPolicy Bypass -File packaging\windows\build-installer.ps1 -
 
 Result:
 
-- `-Variant bundled` creates `dist/windows/Compressity/` and the default installer
-- `-Variant no-engine` creates `dist/windows/Compressity-no-engine/` and a `NoEngine` installer
+- `-Variant bundled` creates `dist/windows/Compressi.ty/` and the default installer
+- `-Variant no-engine` creates `dist/windows/Compressi.ty-no-engine/` and a `NoEngine` installer
 - `-Variant all` creates both staged bundles and both installer variants
 - When Inno Setup is available, the generated installers are written to `dist/windows/installer/`
 
@@ -51,12 +51,14 @@ Requirements:
 
 - Rust toolchain
 - `bash`, `curl`, `tar`
+- A C toolchain that provides `cc` (`sudo apt update && sudo apt install -y build-essential` on Ubuntu/Debian/WSL)
 - Internet access to download the bundled FFmpeg runtime
 - `appimagetool` if `.AppImage` output is required
 
 Preparation:
 
 ```bash
+sudo apt update && sudo apt install -y build-essential
 chmod +x packaging/linux/build-bundle.sh
 chmod +x packaging/linux/AppRun
 ```
@@ -75,7 +77,7 @@ Options:
 
 Result:
 
-- Creates the AppDir in `dist/linux/Compressity.AppDir/`
+- Creates the AppDir in `dist/linux/Compressi.ty.AppDir/`
 - Creates the tarball in `dist/linux/`
 - Creates the AppImage in `dist/linux/` when `appimagetool` is available
 

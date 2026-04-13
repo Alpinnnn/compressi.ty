@@ -22,6 +22,7 @@ fn main() -> eframe::Result<()> {
     let launch_import = launch::LaunchImport::collect_from_command_line();
     let primary_instance = match single_instance::initialize(&launch_import) {
         Ok(single_instance::InstanceState::Primary(primary_instance)) => Some(primary_instance),
+        #[cfg(target_os = "windows")]
         Ok(single_instance::InstanceState::SecondaryForwarded) => return Ok(()),
         Err(error) => {
             eprintln!("single-instance handoff unavailable: {error}");

@@ -54,8 +54,12 @@ pub(in crate::modules::compress_videos::processor) fn build_encode_command(
     if !plan.encoder.is_hardware() {
         command.arg("-pix_fmt").arg("yuv420p");
     }
-    command.arg("-movflags").arg("+faststart");
-    command.arg("-g").arg("240");
+    if !first_pass {
+        command.arg("-movflags").arg("+faststart");
+    }
+    command
+        .arg("-g")
+        .arg(recommended_gop_size(plan.output_fps).to_string());
 
     apply_rate_control(&mut command, plan);
 
@@ -64,7 +68,7 @@ pub(in crate::modules::compress_videos::processor) fn build_encode_command(
         command.arg("-pass").arg(if first_pass { "1" } else { "2" });
     }
 
-    apply_codec_specific_options(&mut command, plan);
+    apply_codec_specific_options(&mut command, plan, first_pass);
     apply_audio_options(&mut command, plan, first_pass);
 
     if preview_mode {
@@ -105,13 +109,7 @@ fn apply_rate_control(command: &mut Command, plan: &EncodePlan) {
                 if let Some(hardware_cq) = plan.hardware_cq {
                     command.arg("-global_quality").arg(hardware_cq.to_string());
                 } else {
-                    command
-                        .arg("-b:v")
-                        .arg(format!("{}k", plan.video_bitrate_kbps))
-                        .arg("-maxrate")
-                        .arg(format!("{}k", plan.video_bitrate_kbps))
-                        .arg("-bufsize")
-                        .arg(format!("{}k", plan.video_bitrate_kbps.saturating_mul(2)));
+                    apply_constrained_vbr(command, plan.video_bitrate_kbps);
                 }
             }
             EncoderBackend::Nvidia | EncoderBackend::Amd => {
@@ -124,35 +122,40 @@ fn apply_rate_control(command: &mut Command, plan: &EncodePlan) {
                         .arg("-b:v")
                         .arg(format!("{}k", plan.video_bitrate_kbps))
                         .arg("-maxrate")
-                        .arg(format!("{}k", plan.video_bitrate_kbps.saturating_mul(2)));
-                } else {
-                    command
-                        .arg("-b:v")
-                        .arg(format!("{}k", plan.video_bitrate_kbps))
-                        .arg("-maxrate")
-                        .arg(format!("{}k", plan.video_bitrate_kbps))
+                        .arg(format!(
+                            "{}k",
+                            constrained_peak_kbps(plan.video_bitrate_kbps)
+                        ))
                         .arg("-bufsize")
-                        .arg(format!("{}k", plan.video_bitrate_kbps.saturating_mul(2)));
+                        .arg(format!(
+                            "{}k",
+                            constrained_peak_kbps(plan.video_bitrate_kbps)
+                        ));
+                } else {
+                    command.arg("-rc:v").arg("vbr");
+                    apply_constrained_vbr(command, plan.video_bitrate_kbps);
                 }
             }
             EncoderBackend::Software => {
-                command
-                    .arg("-b:v")
-                    .arg(format!("{}k", plan.video_bitrate_kbps))
-                    .arg("-maxrate")
-                    .arg(format!("{}k", plan.video_bitrate_kbps))
-                    .arg("-bufsize")
-                    .arg(format!("{}k", plan.video_bitrate_kbps.saturating_mul(2)));
+                if plan.pass_count == 2 {
+                    command
+                        .arg("-b:v")
+                        .arg(format!("{}k", plan.video_bitrate_kbps));
+                } else {
+                    apply_constrained_vbr(command, plan.video_bitrate_kbps);
+                }
             }
         },
     }
 }
 
-fn apply_codec_specific_options(command: &mut Command, plan: &EncodePlan) {
+fn apply_codec_specific_options(command: &mut Command, plan: &EncodePlan, first_pass: bool) {
     match plan.encoder.codec {
         CodecChoice::H264 => {}
         CodecChoice::H265 => {
-            command.arg("-tag:v").arg("hvc1");
+            if !first_pass {
+                command.arg("-tag:v").arg("hvc1");
+            }
         }
         CodecChoice::Av1 => {
             if matches!(plan.encoder.backend, EncoderBackend::Software) {
@@ -165,15 +168,13 @@ fn apply_codec_specific_options(command: &mut Command, plan: &EncodePlan) {
 fn apply_audio_options(command: &mut Command, plan: &EncodePlan, first_pass: bool) {
     if first_pass {
         command.arg("-an");
-        command.arg("-f").arg("mp4");
+        command.arg("-f").arg("null");
     } else if let Some(audio_bitrate_kbps) = plan.audio_bitrate_kbps {
         command
             .arg("-c:a")
-            .arg("aac")
+            .arg(plan.audio_encoder_name)
             .arg("-b:a")
-            .arg(format!("{}k", audio_bitrate_kbps))
-            .arg("-ac")
-            .arg("2");
+            .arg(format!("{}k", audio_bitrate_kbps));
     } else {
         command.arg("-an");
     }
@@ -194,4 +195,168 @@ fn build_filter_chain(video: &VideoMetadata, plan: &EncodePlan) -> String {
     }
 
     filters.join(",")
+}
+
+fn recommended_gop_size(output_fps: f32) -> u32 {
+    ((output_fps.max(12.0) * 2.0).round() as u32).clamp(24, 240)
+}
+
+fn constrained_peak_kbps(target_kbps: u32) -> u32 {
+    target_kbps
+        .saturating_mul(2)
+        .max(target_kbps.saturating_add(1))
+}
+
+fn apply_constrained_vbr(command: &mut Command, target_kbps: u32) {
+    let peak_kbps = constrained_peak_kbps(target_kbps);
+    command
+        .arg("-b:v")
+        .arg(format!("{}k", target_kbps))
+        .arg("-maxrate")
+        .arg(format!("{}k", peak_kbps))
+        .arg("-bufsize")
+        .arg(format!("{}k", peak_kbps));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_encode_command;
+    use crate::modules::compress_videos::models::{
+        CodecChoice, EncoderBackend, ResolvedEncoder, VideoMetadata,
+    };
+    use crate::modules::compress_videos::processor::planning::strategy::EncodePlan;
+    use std::{path::Path, process::Command};
+
+    #[test]
+    fn first_pass_uses_null_muxer_without_faststart_or_vbv_caps() {
+        let video = sample_video();
+        let plan = sample_plan();
+
+        let command = build_encode_command(
+            Path::new("ffmpeg"),
+            &video,
+            &EncodePlan {
+                encoder: ResolvedEncoder {
+                    codec: CodecChoice::H265,
+                    backend: EncoderBackend::Software,
+                },
+                pass_count: 2,
+                ..plan
+            },
+            0.0,
+            video.duration_secs,
+            Path::new("NUL"),
+            Some(Path::new("passlog")),
+            true,
+            false,
+        );
+
+        let args = command_args(&command);
+        assert!(contains_arg_pair(&args, "-f", "null"));
+        assert!(contains_arg_pair(&args, "-b:v", "2400k"));
+        assert!(!contains_flag(&args, "-movflags"));
+        assert!(!contains_flag(&args, "-maxrate"));
+        assert!(!contains_arg_pair(&args, "-tag:v", "hvc1"));
+    }
+
+    #[test]
+    fn final_pass_uses_selected_audio_encoder_without_forcing_stereo() {
+        let video = sample_video();
+        let command = build_encode_command(
+            Path::new("ffmpeg"),
+            &video,
+            &EncodePlan {
+                audio_encoder_name: "libfdk_aac",
+                ..sample_plan()
+            },
+            0.0,
+            video.duration_secs,
+            Path::new("out.mp4"),
+            None,
+            false,
+            false,
+        );
+
+        let args = command_args(&command);
+        assert!(contains_arg_pair(&args, "-c:a", "libfdk_aac"));
+        assert!(contains_arg_pair(&args, "-b:a", "128k"));
+        assert!(!contains_flag(&args, "-ac"));
+    }
+
+    #[test]
+    fn one_pass_bitrate_mode_uses_constrained_vbr_and_dynamic_gop() {
+        let video = sample_video();
+        let command = build_encode_command(
+            Path::new("ffmpeg"),
+            &video,
+            &EncodePlan {
+                output_fps: 30.0,
+                ..sample_plan()
+            },
+            0.0,
+            video.duration_secs,
+            Path::new("out.mp4"),
+            None,
+            false,
+            false,
+        );
+
+        let args = command_args(&command);
+        assert!(contains_arg_pair(&args, "-b:v", "2400k"));
+        assert!(contains_arg_pair(&args, "-maxrate", "4800k"));
+        assert!(contains_arg_pair(&args, "-bufsize", "4800k"));
+        assert!(contains_arg_pair(&args, "-g", "60"));
+    }
+
+    fn command_args(command: &Command) -> Vec<String> {
+        command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn contains_flag(args: &[String], flag: &str) -> bool {
+        args.iter().any(|arg| arg == flag)
+    }
+
+    fn contains_arg_pair(args: &[String], key: &str, value: &str) -> bool {
+        args.windows(2)
+            .any(|window| window[0] == key && window[1] == value)
+    }
+
+    fn sample_video() -> VideoMetadata {
+        VideoMetadata {
+            path: Path::new("clip.mp4").to_path_buf(),
+            file_name: "clip.mp4".to_owned(),
+            size_bytes: 80 * 1_048_576,
+            duration_secs: 42.0,
+            width: 1920,
+            height: 1080,
+            fps: 30.0,
+            container_bitrate_kbps: Some(12_000),
+            video_bitrate_kbps: Some(11_400),
+            audio_bitrate_kbps: Some(128),
+            video_codec: "h264".to_owned(),
+            has_audio: true,
+        }
+    }
+
+    fn sample_plan() -> EncodePlan {
+        EncodePlan {
+            encoder: ResolvedEncoder {
+                codec: CodecChoice::H264,
+                backend: EncoderBackend::Software,
+            },
+            video_bitrate_kbps: 2_400,
+            audio_bitrate_kbps: Some(128),
+            audio_encoder_name: "aac",
+            crf: None,
+            hardware_cq: None,
+            preset: Some("medium".to_owned()),
+            output_width: 1920,
+            output_height: 1080,
+            output_fps: 30.0,
+            pass_count: 1,
+        }
+    }
 }

@@ -4,11 +4,16 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const APP_DIR_NAME: &str = "compressity";
-pub const OUTPUT_DIR_NAME: &str = "compressity-output";
+pub const APP_DIR_NAME: &str = "compressi.ty";
+pub const LEGACY_APP_DIR_NAME: &str = "compressity";
+pub const OUTPUT_DIR_NAME: &str = "compressi.ty-output";
 
 pub fn config_dir() -> Option<PathBuf> {
     dirs::config_dir().map(|dir| dir.join(APP_DIR_NAME))
+}
+
+pub fn legacy_config_dir() -> Option<PathBuf> {
+    dirs::config_dir().map(|dir| dir.join(LEGACY_APP_DIR_NAME))
 }
 
 pub fn data_dir() -> Option<PathBuf> {

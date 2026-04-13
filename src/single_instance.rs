@@ -3,17 +3,21 @@ use std::{
     path::{Path, PathBuf},
     sync::mpsc,
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 use eframe::egui;
 
 use crate::{launch::LaunchImport, runtime};
 
+#[cfg(target_os = "windows")]
+use std::time::{SystemTime, UNIX_EPOCH};
+
 const INBOX_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 pub enum InstanceState {
     Primary(PrimaryInstance),
+    #[cfg(target_os = "windows")]
     SecondaryForwarded,
 }
 
@@ -114,6 +118,7 @@ fn drain_launch_inbox(
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
 fn forward_to_existing_instance(inbox_dir: &Path, launch_import: &LaunchImport) -> io::Result<()> {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)

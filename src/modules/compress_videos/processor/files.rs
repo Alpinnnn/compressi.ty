@@ -73,7 +73,7 @@ pub fn generate_thumbnail(
     duration_secs: f32,
 ) -> Result<(Vec<u8>, u32, u32), String> {
     let thumb_dir = std::env::temp_dir()
-        .join("compressity")
+        .join("compressi.ty")
         .join("video-thumbs");
     fs::create_dir_all(&thumb_dir)
         .map_err(|error| format!("Could not create thumbnail folder: {error}"))?;

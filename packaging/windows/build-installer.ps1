@@ -10,9 +10,9 @@ $ErrorActionPreference = "Stop"
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptRoot "..\\..")).Path
 $windowsDistRoot = Join-Path $repoRoot "dist\\windows"
-$defaultBundledStageDir = Join-Path $windowsDistRoot "Compressity"
-$bundledVariantStageDir = Join-Path $windowsDistRoot "Compressity-bundled"
-$noEngineStageDir = Join-Path $windowsDistRoot "Compressity-no-engine"
+$defaultBundledStageDir = Join-Path $windowsDistRoot "Compressi.ty"
+$bundledVariantStageDir = Join-Path $windowsDistRoot "Compressi.ty-bundled"
+$noEngineStageDir = Join-Path $windowsDistRoot "Compressi.ty-no-engine"
 $installerDir = Join-Path $windowsDistRoot "installer"
 $engineCache = Join-Path $windowsDistRoot "engine-cache"
 $setupIconPath = Join-Path $repoRoot "assets\\icon\\icon.ico"
@@ -70,13 +70,13 @@ function Get-VariantOutputBaseName([string]$VariantName, [string]$AppVersion) {
     switch ($VariantName) {
         "bundled" {
             if ($Variant -eq "all") {
-                return "Compressity-Setup-$AppVersion-Bundled"
+                return "Compressi.ty-Setup-$AppVersion-Bundled"
             }
 
-            return "Compressity-Setup-$AppVersion"
+            return "Compressi.ty-Setup-$AppVersion"
         }
         "no-engine" {
-            return "Compressity-Setup-$AppVersion-NoEngine"
+            return "Compressi.ty-Setup-$AppVersion-NoEngine"
         }
         default {
             throw "Unknown variant '$VariantName'."
@@ -204,7 +204,7 @@ foreach ($variantName in $requestedVariants) {
             "/DMyAppVersion=$version" `
             "/DStageDir=$stageDir" `
             "/F$outputBaseName" `
-            (Join-Path $scriptRoot "compressity.iss")
+            (Join-Path $scriptRoot "compressi.ty.iss")
 
         $createdOutputs.Add((Join-Path $installerDir ($outputBaseName + ".exe")))
     } else {

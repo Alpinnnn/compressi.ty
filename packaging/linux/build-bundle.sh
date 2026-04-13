@@ -4,8 +4,61 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 DIST_ROOT="${REPO_ROOT}/dist/linux"
-APPDIR="${DIST_ROOT}/Compressity.AppDir"
+APPDIR="${DIST_ROOT}/Compressi.ty.AppDir"
 CACHE_DIR="${DIST_ROOT}/engine-cache"
+
+require_cmd() {
+  local cmd="$1"
+  local help_text="$2"
+  if ! command -v "${cmd}" >/dev/null 2>&1; then
+    echo "Missing required command: ${cmd}. ${help_text}" >&2
+    exit 1
+  fi
+}
+
+ensure_engine_cache() {
+  local download_root="$1"
+  local archive_path="$2"
+  local engine_url="$3"
+
+  mkdir -p "${download_root}"
+
+  local ffmpeg_bin
+  local ffprobe_bin
+  ffmpeg_bin="$(find "${download_root}" -type f -name ffmpeg | head -n 1)"
+  ffprobe_bin="$(find "${download_root}" -type f -name ffprobe | head -n 1)"
+
+  if [[ -z "${archive_path}" || -z "${engine_url}" ]]; then
+    echo "Engine cache configuration is incomplete." >&2
+    exit 1
+  fi
+
+  if [[ ! -f "${archive_path}" ]]; then
+    echo "Downloading bundled FFmpeg for Linux..."
+    curl -L "${engine_url}" -o "${archive_path}"
+  fi
+
+  if [[ -z "${ffmpeg_bin}" || -z "${ffprobe_bin}" ]]; then
+    echo "Extracting cached FFmpeg runtime..."
+    tar -xf "${archive_path}" -C "${download_root}"
+
+    ffmpeg_bin="$(find "${download_root}" -type f -name ffmpeg | head -n 1)"
+    ffprobe_bin="$(find "${download_root}" -type f -name ffprobe | head -n 1)"
+  fi
+
+  if [[ -z "${ffmpeg_bin}" || -z "${ffprobe_bin}" ]]; then
+    echo "The cached FFmpeg archive did not contain ffmpeg and ffprobe binaries." >&2
+    exit 1
+  fi
+
+  ENGINE_FFMPEG_BIN="${ffmpeg_bin}"
+  ENGINE_FFPROBE_BIN="${ffprobe_bin}"
+}
+
+require_cmd cargo "Install the Rust toolchain before building the Linux bundle."
+require_cmd cc "Install a C toolchain first. On Ubuntu, Debian, or WSL this is usually: sudo apt update && sudo apt install -y build-essential"
+require_cmd curl "Install curl to download the bundled FFmpeg runtime."
+require_cmd tar "Install tar to unpack the bundled FFmpeg runtime."
 
 if [[ "${1:-}" != "--skip-tests" ]]; then
   (cd "${REPO_ROOT}" && cargo test)
@@ -38,40 +91,28 @@ mkdir -p \
 cp "${REPO_ROOT}/target/release/compressity" "${APPDIR}/usr/bin/compressity"
 cp "${REPO_ROOT}/LICENSE" "${APPDIR}/LICENSE.txt"
 cp "${SCRIPT_DIR}/AppRun" "${APPDIR}/AppRun"
-cp "${SCRIPT_DIR}/compressity.desktop" "${APPDIR}/compressity.desktop"
-cp "${SCRIPT_DIR}/compressity.desktop" "${APPDIR}/usr/share/applications/compressity.desktop"
-cp "${REPO_ROOT}/assets/icon/icon.svg" "${APPDIR}/compressity.svg"
-cp "${REPO_ROOT}/assets/icon/icon.svg" "${APPDIR}/usr/share/icons/hicolor/scalable/apps/compressity.svg"
+cp "${SCRIPT_DIR}/compressi.ty.desktop" "${APPDIR}/compressi.ty.desktop"
+cp "${SCRIPT_DIR}/compressi.ty.desktop" "${APPDIR}/usr/share/applications/compressi.ty.desktop"
+cp "${REPO_ROOT}/assets/icon/icon.svg" "${APPDIR}/compressi.ty.svg"
+cp "${REPO_ROOT}/assets/icon/icon.svg" "${APPDIR}/usr/share/icons/hicolor/scalable/apps/compressi.ty.svg"
 chmod +x "${APPDIR}/AppRun" "${APPDIR}/usr/bin/compressity"
 
 DOWNLOAD_ROOT="${CACHE_DIR}/download"
 ARCHIVE_PATH="${DOWNLOAD_ROOT}/ffmpeg-static.tar.xz"
+ENGINE_FFMPEG_BIN=""
+ENGINE_FFPROBE_BIN=""
+ensure_engine_cache "${DOWNLOAD_ROOT}" "${ARCHIVE_PATH}" "${ENGINE_URL}"
 
-rm -rf "${DOWNLOAD_ROOT}"
-mkdir -p "${DOWNLOAD_ROOT}"
-
-echo "Downloading bundled FFmpeg for Linux..."
-curl -L "${ENGINE_URL}" -o "${ARCHIVE_PATH}"
-tar -xf "${ARCHIVE_PATH}" -C "${DOWNLOAD_ROOT}"
-
-FFMPEG_BIN="$(find "${DOWNLOAD_ROOT}" -type f -name ffmpeg | head -n 1)"
-FFPROBE_BIN="$(find "${DOWNLOAD_ROOT}" -type f -name ffprobe | head -n 1)"
-
-if [[ -z "${FFMPEG_BIN}" || -z "${FFPROBE_BIN}" ]]; then
-  echo "The downloaded FFmpeg archive did not contain ffmpeg and ffprobe binaries." >&2
-  exit 1
-fi
-
-cp "${FFMPEG_BIN}" "${APPDIR}/usr/bin/ffmpeg"
-cp "${FFPROBE_BIN}" "${APPDIR}/usr/bin/ffprobe"
+cp "${ENGINE_FFMPEG_BIN}" "${APPDIR}/usr/bin/ffmpeg"
+cp "${ENGINE_FFPROBE_BIN}" "${APPDIR}/usr/bin/ffprobe"
 chmod +x "${APPDIR}/usr/bin/ffmpeg" "${APPDIR}/usr/bin/ffprobe"
 
-TARBALL="${DIST_ROOT}/Compressity-${APP_VERSION}-${ARCH}.tar.gz"
+TARBALL="${DIST_ROOT}/Compressi.ty-${APP_VERSION}-${ARCH}.tar.gz"
 rm -f "${TARBALL}"
-tar -czf "${TARBALL}" -C "${DIST_ROOT}" "Compressity.AppDir"
+tar -czf "${TARBALL}" -C "${DIST_ROOT}" "Compressi.ty.AppDir"
 
 if command -v appimagetool >/dev/null 2>&1; then
-  APPIMAGE="${DIST_ROOT}/Compressity-${APP_VERSION}-${ARCH}.AppImage"
+  APPIMAGE="${DIST_ROOT}/Compressi.ty-${APP_VERSION}-${ARCH}.AppImage"
   rm -f "${APPIMAGE}"
   appimagetool "${APPDIR}" "${APPIMAGE}"
   echo "Linux AppImage created at ${APPIMAGE}"

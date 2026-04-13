@@ -6,6 +6,14 @@ use crate::modules::{
     compress_videos::models::EncoderAvailability,
 };
 
+#[path = "analysis/profiles.rs"]
+mod profiles;
+
+use self::profiles::{
+    choose_auto_format, estimate_size_bytes, resolve_aac_vbr_mode, resolve_encoder,
+    resolve_target_bitrate,
+};
+
 /// Builds the lightweight smart analysis summary shown above the settings.
 pub fn analyze_audio(metadata: &AudioMetadata, encoders: &EncoderAvailability) -> AudioAnalysis {
     let content_kind = detect_content_kind(metadata);
@@ -122,8 +130,16 @@ pub fn build_plan(
         content_kind,
         encoder_name,
     );
-    let sample_rate_hz = resolve_sample_rate(metadata, settings, content_kind);
-    let channels = resolve_channels(metadata, settings, content_kind);
+    let sample_rate_hz = resolve_sample_rate(metadata, settings, content_kind, output_format);
+    let channels = resolve_channels(metadata, settings, content_kind, output_format);
+    let aac_vbr_mode = resolve_aac_vbr_mode(
+        settings,
+        output_format,
+        encoder_name,
+        target_bitrate_kbps,
+        channels.unwrap_or(metadata.channels),
+    );
+    let mp3_use_abr = output_format == AudioFormat::Mp3 && encoder_name == "libmp3lame";
 
     if metadata.is_lossy() && !output_format.is_lossless() && !settings.convert_format_only {
         warnings.push(
@@ -195,6 +211,8 @@ pub fn build_plan(
         output_format,
         encoder_name,
         target_bitrate_kbps,
+        aac_vbr_mode,
+        mp3_use_abr,
         sample_rate_hz,
         channels,
         content_kind,
@@ -230,94 +248,15 @@ pub(super) fn source_bitrate_kbps(metadata: &AudioMetadata) -> Option<u32> {
     })
 }
 
-fn choose_auto_format(
-    content_kind: AudioContentKind,
-    preset: AudioAutoPreset,
-    encoders: &EncoderAvailability,
-) -> AudioFormat {
-    let preferred_formats = match (content_kind, preset) {
-        (AudioContentKind::Voice, _) | (_, AudioAutoPreset::SmallSize) => [
-            AudioFormat::Opus,
-            AudioFormat::Aac,
-            AudioFormat::Mp3,
-            AudioFormat::Flac,
-        ],
-        (_, _) => [
-            AudioFormat::Aac,
-            AudioFormat::Opus,
-            AudioFormat::Mp3,
-            AudioFormat::Flac,
-        ],
-    };
-
-    preferred_formats
-        .into_iter()
-        .find(|format| format_supported(*format, encoders))
-        .unwrap_or(AudioFormat::Flac)
-}
-
-fn resolve_encoder(
-    requested_format: AudioFormat,
-    content_kind: AudioContentKind,
-    encoders: &EncoderAvailability,
-) -> (AudioFormat, &'static str) {
-    if let Some(encoder_name) = encoder_name_for_format(requested_format, encoders) {
-        return (requested_format, encoder_name);
-    }
-
-    let fallback = choose_auto_format(content_kind, AudioAutoPreset::Balanced, encoders);
-    if let Some(encoder_name) = encoder_name_for_format(fallback, encoders) {
-        return (fallback, encoder_name);
-    }
-
-    // The bundled runtime should always expose at least one audio encoder. If the current build
-    // is unusually limited, fall back to the native AAC encoder name so the final FFmpeg error is
-    // explicit instead of silently hiding the problem.
-    (AudioFormat::Aac, "aac")
-}
-
-fn resolve_target_bitrate(
-    metadata: &AudioMetadata,
-    settings: &AudioCompressionSettings,
-    output_format: AudioFormat,
-    content_kind: AudioContentKind,
-    encoder_name: &str,
-) -> Option<u32> {
-    if output_format.is_lossless() {
-        return None;
-    }
-
-    let bitrate = match settings.mode {
-        AudioWorkflowMode::Auto => {
-            auto_target_bitrate(output_format, content_kind, settings.auto_preset)
-        }
-        AudioWorkflowMode::Manual => Some(settings.manual_bitrate_kbps.clamp(24, 320)),
-    }?;
-
-    let source_bitrate = source_bitrate_kbps(metadata);
-    let format_floor = high_quality_floor(output_format, content_kind);
-    let adjusted = if settings.convert_format_only {
-        source_bitrate.map(|source| bitrate.max(source).max(format_floor))
-    } else {
-        Some(bitrate)
-    };
-
-    adjusted.map(|value| {
-        if encoder_name == "libshine" {
-            round_to_nearest(value, 16).clamp(32, 320)
-        } else {
-            value
-        }
-    })
-}
-
 fn resolve_sample_rate(
     metadata: &AudioMetadata,
     settings: &AudioCompressionSettings,
     content_kind: AudioContentKind,
+    output_format: AudioFormat,
 ) -> Option<u32> {
     match settings.mode {
         AudioWorkflowMode::Manual => settings.manual_sample_rate_hz,
+        AudioWorkflowMode::Auto if output_format == AudioFormat::Opus => None,
         AudioWorkflowMode::Auto => match (content_kind, settings.auto_preset) {
             (AudioContentKind::Voice, AudioAutoPreset::SmallSize) => Some(24_000),
             (AudioContentKind::Voice, AudioAutoPreset::Balanced) => Some(32_000),
@@ -331,67 +270,17 @@ fn resolve_channels(
     metadata: &AudioMetadata,
     settings: &AudioCompressionSettings,
     content_kind: AudioContentKind,
+    output_format: AudioFormat,
 ) -> Option<u8> {
     match settings.mode {
         AudioWorkflowMode::Manual => settings.manual_channels,
+        AudioWorkflowMode::Auto if output_format == AudioFormat::Opus => None,
         AudioWorkflowMode::Auto => match content_kind {
             AudioContentKind::Voice if metadata.channels > 1 => Some(1),
             _ => None,
         },
     }
 }
-
-fn auto_target_bitrate(
-    output_format: AudioFormat,
-    content_kind: AudioContentKind,
-    preset: AudioAutoPreset,
-) -> Option<u32> {
-    let bitrate = match (output_format, content_kind, preset) {
-        (AudioFormat::Flac, _, _) => return None,
-        (AudioFormat::Opus, AudioContentKind::Voice, AudioAutoPreset::HighQuality) => 48,
-        (AudioFormat::Opus, AudioContentKind::Voice, AudioAutoPreset::Balanced) => 32,
-        (AudioFormat::Opus, AudioContentKind::Voice, AudioAutoPreset::SmallSize) => 24,
-        (AudioFormat::Opus, AudioContentKind::Music, AudioAutoPreset::HighQuality) => 128,
-        (AudioFormat::Opus, AudioContentKind::Music, AudioAutoPreset::Balanced) => 96,
-        (AudioFormat::Opus, AudioContentKind::Music, AudioAutoPreset::SmallSize) => 72,
-        (AudioFormat::Opus, AudioContentKind::Mixed, AudioAutoPreset::HighQuality) => 112,
-        (AudioFormat::Opus, AudioContentKind::Mixed, AudioAutoPreset::Balanced) => 80,
-        (AudioFormat::Opus, AudioContentKind::Mixed, AudioAutoPreset::SmallSize) => 64,
-        (AudioFormat::Aac, AudioContentKind::Voice, AudioAutoPreset::HighQuality) => 72,
-        (AudioFormat::Aac, AudioContentKind::Voice, AudioAutoPreset::Balanced) => 64,
-        (AudioFormat::Aac, AudioContentKind::Voice, AudioAutoPreset::SmallSize) => 48,
-        (AudioFormat::Aac, AudioContentKind::Music, AudioAutoPreset::HighQuality) => 160,
-        (AudioFormat::Aac, AudioContentKind::Music, AudioAutoPreset::Balanced) => 128,
-        (AudioFormat::Aac, AudioContentKind::Music, AudioAutoPreset::SmallSize) => 96,
-        (AudioFormat::Aac, AudioContentKind::Mixed, AudioAutoPreset::HighQuality) => 144,
-        (AudioFormat::Aac, AudioContentKind::Mixed, AudioAutoPreset::Balanced) => 112,
-        (AudioFormat::Aac, AudioContentKind::Mixed, AudioAutoPreset::SmallSize) => 80,
-        (AudioFormat::Mp3, AudioContentKind::Voice, AudioAutoPreset::HighQuality) => 96,
-        (AudioFormat::Mp3, AudioContentKind::Voice, AudioAutoPreset::Balanced) => 64,
-        (AudioFormat::Mp3, AudioContentKind::Voice, AudioAutoPreset::SmallSize) => 48,
-        (AudioFormat::Mp3, AudioContentKind::Music, AudioAutoPreset::HighQuality) => 192,
-        (AudioFormat::Mp3, AudioContentKind::Music, AudioAutoPreset::Balanced) => 128,
-        (AudioFormat::Mp3, AudioContentKind::Music, AudioAutoPreset::SmallSize) => 96,
-        (AudioFormat::Mp3, AudioContentKind::Mixed, AudioAutoPreset::HighQuality) => 160,
-        (AudioFormat::Mp3, AudioContentKind::Mixed, AudioAutoPreset::Balanced) => 112,
-        (AudioFormat::Mp3, AudioContentKind::Mixed, AudioAutoPreset::SmallSize) => 80,
-    };
-
-    Some(bitrate)
-}
-
-fn high_quality_floor(output_format: AudioFormat, content_kind: AudioContentKind) -> u32 {
-    match (output_format, content_kind) {
-        (AudioFormat::Opus, AudioContentKind::Voice) => 48,
-        (AudioFormat::Opus, _) => 112,
-        (AudioFormat::Aac, AudioContentKind::Voice) => 72,
-        (AudioFormat::Aac, _) => 144,
-        (AudioFormat::Mp3, AudioContentKind::Voice) => 96,
-        (AudioFormat::Mp3, _) => 160,
-        (AudioFormat::Flac, _) => 0,
-    }
-}
-
 fn is_bitrate_too_aggressive(content_kind: AudioContentKind, per_channel_bitrate: u32) -> bool {
     match content_kind {
         AudioContentKind::Voice => per_channel_bitrate < 24,
@@ -400,74 +289,16 @@ fn is_bitrate_too_aggressive(content_kind: AudioContentKind, per_channel_bitrate
     }
 }
 
-fn estimate_size_bytes(
-    metadata: &AudioMetadata,
-    output_format: AudioFormat,
-    target_bitrate_kbps: Option<u32>,
-    convert_format_only: bool,
-) -> u64 {
-    if output_format.is_lossless() {
-        if metadata.is_lossless {
-            return ((metadata.size_bytes as f32) * 0.58).round() as u64;
-        }
-        return ((metadata.size_bytes as f32) * 1.18).round() as u64;
-    }
-
-    let duration_secs = metadata.duration_secs.max(1.0);
-    let bitrate_kbps =
-        target_bitrate_kbps.unwrap_or_else(|| source_bitrate_kbps(metadata).unwrap_or(128));
-    let container_overhead = match output_format {
-        AudioFormat::Aac => 1.04,
-        AudioFormat::Opus => 1.02,
-        AudioFormat::Mp3 => 1.01,
-        AudioFormat::Flac => 1.0,
-    };
-    let estimated = ((duration_secs * bitrate_kbps as f32 * 1000.0 / 8.0) * container_overhead)
-        .max(8_192.0)
-        .round() as u64;
-
-    if convert_format_only && !output_format.is_lossless() {
-        estimated.max(metadata.size_bytes.saturating_mul(98) / 100)
-    } else {
-        estimated
-    }
-}
-
-fn format_supported(format: AudioFormat, encoders: &EncoderAvailability) -> bool {
-    encoder_name_for_format(format, encoders).is_some()
-}
-
-fn encoder_name_for_format(
-    format: AudioFormat,
-    encoders: &EncoderAvailability,
-) -> Option<&'static str> {
-    match format {
-        AudioFormat::Mp3 => encoders.preferred_mp3_encoder_name(),
-        AudioFormat::Aac => encoders.preferred_aac_encoder_name(),
-        AudioFormat::Opus => encoders.preferred_opus_encoder_name(),
-        AudioFormat::Flac => encoders.supports_flac().then_some("flac"),
-    }
-}
-
-fn round_to_nearest(value: u32, step: u32) -> u32 {
-    if step == 0 {
-        return value;
-    }
-
-    let lower = value / step * step;
-    let upper = lower + step;
-    if value - lower < upper.saturating_sub(value) {
-        lower.max(step)
-    } else {
-        upper
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{choose_auto_format, detect_content_kind, estimate_size_bytes};
+    use super::{
+        build_plan, choose_auto_format, detect_content_kind, estimate_size_bytes, profiles,
+    };
     use crate::modules::{
-        compress_audio::models::{AudioAutoPreset, AudioContentKind, AudioFormat, AudioMetadata},
+        compress_audio::models::{
+            AudioAutoPreset, AudioCompressionSettings, AudioContentKind, AudioFormat,
+            AudioMetadata, AudioWorkflowMode,
+        },
         compress_videos::models::EncoderAvailability,
     };
     use std::path::PathBuf;
@@ -525,5 +356,81 @@ mod tests {
         let estimate = estimate_size_bytes(&metadata, AudioFormat::Aac, Some(128), false);
 
         assert!(estimate < metadata.size_bytes);
+    }
+
+    #[test]
+    fn prefers_libfdk_for_aac_when_available() {
+        let encoders = EncoderAvailability {
+            aac: true,
+            libfdk_aac: true,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            profiles::preferred_audio_aac_encoder_name(&encoders),
+            Some("libfdk_aac")
+        );
+    }
+
+    #[test]
+    fn auto_aac_plan_uses_fdk_vbr_when_available() {
+        let metadata = sample_music_metadata();
+        let encoders = EncoderAvailability {
+            aac: true,
+            libfdk_aac: true,
+            ..Default::default()
+        };
+
+        let plan = build_plan(&metadata, &AudioCompressionSettings::default(), &encoders);
+
+        assert_eq!(plan.output_format, AudioFormat::Aac);
+        assert_eq!(plan.encoder_name, "libfdk_aac");
+        assert_eq!(plan.aac_vbr_mode, Some(4));
+    }
+
+    #[test]
+    fn auto_opus_voice_keeps_original_layout_for_encoder_optimization() {
+        let metadata = AudioMetadata {
+            path: PathBuf::from("voice.wav"),
+            file_name: "voice.wav".to_owned(),
+            size_bytes: 6_000_000,
+            duration_secs: 240.0,
+            audio_bitrate_kbps: Some(192),
+            sample_rate_hz: 48_000,
+            channels: 2,
+            codec_name: "pcm_s16le".to_owned(),
+            container_name: "wav".to_owned(),
+            is_lossless: true,
+        };
+        let encoders = EncoderAvailability {
+            libopus: true,
+            ..Default::default()
+        };
+        let settings = AudioCompressionSettings {
+            mode: AudioWorkflowMode::Auto,
+            auto_preset: AudioAutoPreset::SmallSize,
+            ..Default::default()
+        };
+
+        let plan = build_plan(&metadata, &settings, &encoders);
+
+        assert_eq!(plan.output_format, AudioFormat::Opus);
+        assert_eq!(plan.sample_rate_hz, None);
+        assert_eq!(plan.channels, None);
+    }
+
+    fn sample_music_metadata() -> AudioMetadata {
+        AudioMetadata {
+            path: PathBuf::from("track.wav"),
+            file_name: "track.wav".to_owned(),
+            size_bytes: 40 * 1_048_576,
+            duration_secs: 240.0,
+            audio_bitrate_kbps: Some(1_411),
+            sample_rate_hz: 44_100,
+            channels: 2,
+            codec_name: "pcm_s16le".to_owned(),
+            container_name: "wav".to_owned(),
+            is_lossless: true,
+        }
     }
 }

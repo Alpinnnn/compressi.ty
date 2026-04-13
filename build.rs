@@ -46,7 +46,7 @@ fn embed_windows_icon() -> Result<(), Box<dyn std::error::Error>> {
         icon_dir.add_entry(ico::IconDirEntry::encode(&image)?);
     }
 
-    let icon_path = out_dir.join("compressity.ico");
+    let icon_path = out_dir.join("compressi.ty.ico");
     let mut icon_file = File::create(&icon_path)?;
     icon_dir.write(&mut icon_file)?;
 

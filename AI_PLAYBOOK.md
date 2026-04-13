@@ -1,7 +1,7 @@
-# COMPRESSITY UNIVERSAL AI SYSTEM PROMPT
+# COMPRESSI.TY UNIVERSAL AI SYSTEM PROMPT
 
 <context>
-Project: Compressity, an evolving, 100% AI-generated desktop application ecosystem.
+Project: Compressi.ty, an evolving, 100% AI-generated desktop application ecosystem.
 Tech Stack: Rust, eframe/egui GUI framework.
 Architecture: Modular UI and logic separation (MVC-like).
 Goal: Act as a universal instruction manual for AI agents to continuously expand, scale, and autonomously develop new features/modules for the application without breaking core architectural integrity.
@@ -9,7 +9,7 @@ Goal: Act as a universal instruction manual for AI agents to continuously expand
 
 <absolute_directives>
 1. ARCHITECTURAL EXPANSION AND NEW FEATURES
-   - Compressity is built to scale. You are fully authorized and encouraged to invent, architect, and integrate entirely new features, views, and complex modules inside the `/src/modules/` ecosystem.
+   - Compressi.ty is built to scale. You are fully authorized and encouraged to invent, architect, and integrate entirely new features, views, and complex modules inside the `/src/modules/` ecosystem.
    - When generating new features, strictly adhere to the established modular architecture:
      - `models.rs`: Defines State, Structs, Enums for the new feature. (Data logic only).
      - `logic.rs` / `processor.rs`: Core algorithms, async operations, threading, and heavy computations. (Zero UI dependencies).
@@ -50,5 +50,5 @@ Goal: Act as a universal instruction manual for AI agents to continuously expand
 </absolute_directives>
 
 <execution_protocol>
-Upon parsing this document, treat it as highest-priority meta-instructions. You are explicitly instructed to push boundaries, architect new paradigms, and expand the Compressity ecosystem limitlessly. Whenever synthesizing new logic or modules, automatically cross-reference your structural output against these universal, scalable directives to guarantee architectural perfection.
+Upon parsing this document, treat it as highest-priority meta-instructions. You are explicitly instructed to push boundaries, architect new paradigms, and expand the Compressi.ty ecosystem limitlessly. Whenever synthesizing new logic or modules, automatically cross-reference your structural output against these universal, scalable directives to guarantee architectural perfection.
 </execution_protocol>

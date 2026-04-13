@@ -424,7 +424,7 @@ fn render_estimate(
             ui.label(
                 RichText::new(recommendation)
                     .size(10.5)
-                    .color(theme.colors.fg_dim),
+                    .color(recommendation_color(theme, recommendation)),
             );
         }
 
@@ -446,6 +446,14 @@ fn render_estimate(
             );
         }
     });
+}
+
+fn recommendation_color(theme: &AppTheme, recommendation: &str) -> egui::Color32 {
+    if recommendation.to_ascii_lowercase().contains("aggressive") {
+        theme.colors.negative
+    } else {
+        theme.colors.fg_dim
+    }
 }
 
 fn render_apply_to_all_button(ui: &mut Ui, theme: &AppTheme) -> bool {

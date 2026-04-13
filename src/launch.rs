@@ -100,6 +100,7 @@ impl LaunchImport {
         mem::take(&mut self.video_paths)
     }
 
+    #[cfg(target_os = "windows")]
     /// Serializes the launch request for inter-process handoff.
     pub fn to_ipc_payload(&self) -> String {
         let mut payload = String::from(IPC_MAGIC);
@@ -189,6 +190,7 @@ fn supported_module_for_path(path: &Path) -> Option<ModuleKind> {
     None
 }
 
+#[cfg(target_os = "windows")]
 fn module_to_ipc_name(module: ModuleKind) -> Option<&'static str> {
     match module {
         ModuleKind::CompressAudio => Some("audio"),

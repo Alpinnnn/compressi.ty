@@ -220,6 +220,8 @@ pub struct AudioCompressionPlan {
     pub output_format: AudioFormat,
     pub encoder_name: &'static str,
     pub target_bitrate_kbps: Option<u32>,
+    pub aac_vbr_mode: Option<u8>,
+    pub mp3_use_abr: bool,
     pub sample_rate_hz: Option<u32>,
     pub channels: Option<u8>,
     pub content_kind: AudioContentKind,

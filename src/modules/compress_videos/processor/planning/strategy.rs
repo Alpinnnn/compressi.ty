@@ -8,6 +8,7 @@ pub(in crate::modules::compress_videos::processor) struct EncodePlan {
     pub(in crate::modules::compress_videos::processor) encoder: ResolvedEncoder,
     pub(in crate::modules::compress_videos::processor) video_bitrate_kbps: u32,
     pub(in crate::modules::compress_videos::processor) audio_bitrate_kbps: Option<u32>,
+    pub(in crate::modules::compress_videos::processor) audio_encoder_name: &'static str,
     pub(in crate::modules::compress_videos::processor) crf: Option<u8>,
     /// Quality value for hardware encoders (`-cq:v` or `-global_quality`).
     pub(in crate::modules::compress_videos::processor) hardware_cq: Option<u8>,
@@ -26,6 +27,7 @@ pub(in crate::modules::compress_videos::processor) fn build_plan(
 ) -> EncodePlan {
     let codec = select_codec(settings, encoders);
     let encoder = encoders.resolved_encoder(codec);
+    let audio_encoder_name = encoders.preferred_aac_encoder_name().unwrap_or("aac");
     let resolution_choice = resolve_resolution_choice(video, settings);
     let (output_width, output_height) = resolve_dimensions(video, resolution_choice);
     let output_fps = resolve_fps(video, settings);
@@ -39,6 +41,7 @@ pub(in crate::modules::compress_videos::processor) fn build_plan(
             output_width,
             output_height,
             output_fps,
+            audio_encoder_name,
         ),
         CompressionMode::GoodQuality => quality_plan(
             video,
@@ -49,6 +52,7 @@ pub(in crate::modules::compress_videos::processor) fn build_plan(
             output_width,
             output_height,
             output_fps,
+            audio_encoder_name,
         ),
         CompressionMode::CustomAdvanced => custom_plan(
             video,
@@ -58,6 +62,7 @@ pub(in crate::modules::compress_videos::processor) fn build_plan(
             output_width,
             output_height,
             output_fps,
+            audio_encoder_name,
         ),
     }
 }
@@ -91,6 +96,7 @@ fn reduce_size_plan(
     output_width: u32,
     output_height: u32,
     output_fps: f32,
+    audio_encoder_name: &'static str,
 ) -> EncodePlan {
     let total_kbps = target_total_bitrate(settings.target_size_mb, video.duration_secs);
     let audio_bitrate_kbps = video.has_audio.then_some(aggressive_audio_bitrate(video));
@@ -102,6 +108,7 @@ fn reduce_size_plan(
         encoder,
         video_bitrate_kbps,
         audio_bitrate_kbps,
+        audio_encoder_name,
         crf: None,
         hardware_cq: None,
         preset: encoder_preset(encoder, preview_mode, true),
@@ -125,6 +132,7 @@ fn quality_plan(
     output_width: u32,
     output_height: u32,
     output_fps: f32,
+    audio_encoder_name: &'static str,
 ) -> EncodePlan {
     let audio_bitrate_kbps = video.has_audio.then_some(quality_audio_bitrate(video));
     let crf = quality_to_crf(settings.quality, codec);
@@ -135,6 +143,7 @@ fn quality_plan(
         encoder,
         video_bitrate_kbps,
         audio_bitrate_kbps,
+        audio_encoder_name,
         crf: if encoder.is_hardware() {
             None
         } else {
@@ -161,6 +170,7 @@ fn custom_plan(
     output_width: u32,
     output_height: u32,
     output_fps: f32,
+    audio_encoder_name: &'static str,
 ) -> EncodePlan {
     let audio_bitrate_kbps = if video.has_audio && settings.custom_audio_enabled {
         Some(settings.custom_audio_bitrate_kbps.clamp(64, 320))
@@ -172,6 +182,7 @@ fn custom_plan(
         encoder,
         video_bitrate_kbps: settings.custom_bitrate_kbps.clamp(350, 80_000),
         audio_bitrate_kbps,
+        audio_encoder_name,
         crf: None,
         hardware_cq: None,
         preset: encoder_preset(encoder, preview_mode, false),
@@ -310,9 +321,9 @@ fn encoder_preset(
                 if preview_mode {
                     "p1"
                 } else if aggressive {
-                    "p5"
+                    "p6"
                 } else {
-                    "p4"
+                    "p5"
                 }
                 .to_owned(),
             ),
@@ -369,4 +380,73 @@ fn encoder_preset(
 
 fn make_even(value: u32) -> u32 {
     if value % 2 == 0 { value } else { value - 1 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_plan, encoder_preset};
+    use crate::modules::compress_videos::models::{
+        CodecChoice, CompressionMode, EncoderAvailability, EncoderBackend, ResolutionChoice,
+        ResolvedEncoder, VideoMetadata, VideoSettings,
+    };
+    use std::path::PathBuf;
+
+    #[test]
+    fn plan_uses_detected_audio_encoder() {
+        let video = sample_video();
+        let settings = sample_settings(CompressionMode::GoodQuality);
+        let encoders = EncoderAvailability {
+            h264: true,
+            h264_nvidia: true,
+            libfdk_aac: true,
+            ..Default::default()
+        };
+
+        let plan = build_plan(&video, &settings, &encoders, false);
+
+        assert_eq!(plan.audio_encoder_name, "libfdk_aac");
+    }
+
+    #[test]
+    fn nvidia_presets_track_quality_modes() {
+        let encoder = ResolvedEncoder {
+            codec: CodecChoice::H264,
+            backend: EncoderBackend::Nvidia,
+        };
+
+        assert_eq!(encoder_preset(encoder, true, false).as_deref(), Some("p1"));
+        assert_eq!(encoder_preset(encoder, false, false).as_deref(), Some("p5"));
+        assert_eq!(encoder_preset(encoder, false, true).as_deref(), Some("p6"));
+    }
+
+    fn sample_video() -> VideoMetadata {
+        VideoMetadata {
+            path: PathBuf::from("clip.mp4"),
+            file_name: "clip.mp4".to_owned(),
+            size_bytes: 80 * 1_048_576,
+            duration_secs: 42.0,
+            width: 1920,
+            height: 1080,
+            fps: 30.0,
+            container_bitrate_kbps: Some(12_000),
+            video_bitrate_kbps: Some(11_400),
+            audio_bitrate_kbps: Some(128),
+            video_codec: "h264".to_owned(),
+            has_audio: true,
+        }
+    }
+
+    fn sample_settings(mode: CompressionMode) -> VideoSettings {
+        VideoSettings {
+            mode,
+            target_size_mb: 20,
+            quality: 72,
+            resolution: ResolutionChoice::Auto,
+            custom_bitrate_kbps: 5_000,
+            custom_codec: CodecChoice::H264,
+            custom_fps: 30,
+            custom_audio_enabled: true,
+            custom_audio_bitrate_kbps: 128,
+        }
+    }
 }
