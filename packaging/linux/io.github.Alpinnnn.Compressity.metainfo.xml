@@ -1,12 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>compressi.ty.desktop</id>
+  <id>io.github.Alpinnnn.Compressity</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>LicenseRef-Compressity-Personal-Source-Share-Attribution-NonCommercial-1.0</project_license>
   <name>Compressi.ty</name>
-  <summary>Local-first desktop compression toolkit for photos, audio, and videos.</summary>
-  <developer_name>Compressi.ty</developer_name>
-  <launchable type="desktop-id">compressi.ty.desktop</launchable>
+  <summary>Local-first desktop compression toolkit for photos, audio, and videos</summary>
+  <developer id="io.github.alpinnnn">
+    <name>Compressi.ty</name>
+  </developer>
+  <launchable type="desktop-id">io.github.Alpinnnn.Compressity.desktop</launchable>
+  <url type="homepage">https://github.com/Alpinnnn/compressi.ty</url>
+  <url type="bugtracker">https://github.com/Alpinnnn/compressi.ty/issues</url>
   <provides>
     <binary>compressity</binary>
   </provides>
@@ -20,5 +24,6 @@
       and audio workflows, queue-based processing, and configurable output locations.
     </p>
   </description>
+  <update_contact>euphyfve@gmail.com</update_contact>
   <content_rating type="oars-1.1"/>
 </component>
