@@ -353,7 +353,7 @@ fn run_preview_stream(
     let single_frame = matches!(mode, PreviewStreamMode::SingleFrame);
     let mut command =
         processor::build_preview_stream_command(&engine, &path, start_secs, config, single_frame);
-    let mut child = match command.spawn() {
+    let mut child = match crate::process_lifecycle::spawn_child(&mut command) {
         Ok(child) => child,
         Err(error) => {
             let _ = sender.send(PreviewStreamEvent {
@@ -366,6 +366,7 @@ fn run_preview_stream(
     };
 
     let Some(mut stdout) = child.stdout.take() else {
+        let _ = child.kill();
         let _ = sender.send(PreviewStreamEvent {
             frame: None,
             finished: false,
@@ -374,6 +375,7 @@ fn run_preview_stream(
         return;
     };
     let Some(stderr) = child.stderr.take() else {
+        let _ = child.kill();
         let _ = sender.send(PreviewStreamEvent {
             frame: None,
             finished: false,
@@ -494,8 +496,6 @@ fn wait_for_preview_child(
         .map_err(|error| format!("Could not wait for preview stream: {error}"))
 }
 
-fn read_preview_stderr<R: Read>(mut reader: R) -> String {
-    let mut buffer = String::new();
-    let _ = reader.read_to_string(&mut buffer);
-    buffer
+fn read_preview_stderr<R: Read>(reader: R) -> String {
+    crate::process_lifecycle::read_pipe_to_string(reader)
 }

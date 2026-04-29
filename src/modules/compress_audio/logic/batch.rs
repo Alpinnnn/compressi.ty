@@ -61,12 +61,20 @@ pub struct AudioBatchHandle {
     pub output_dir: PathBuf,
     pub item_ids: Vec<u64>,
     cancel_flag: Arc<AtomicBool>,
+    active_child: Arc<Mutex<Option<Child>>>,
 }
 
 impl AudioBatchHandle {
     /// Signals that the running audio batch should be cancelled.
     pub fn cancel(&self) {
         self.cancel_flag.store(true, Ordering::Relaxed);
+        kill_active_child(&self.active_child);
+    }
+}
+
+impl Drop for AudioBatchHandle {
+    fn drop(&mut self) {
+        self.cancel();
     }
 }
 
@@ -94,6 +102,8 @@ pub fn start_audio_batch(
     let (sender, receiver) = mpsc::channel();
     let cancel_flag = Arc::new(AtomicBool::new(false));
     let thread_cancel = Arc::clone(&cancel_flag);
+    let active_child = Arc::new(Mutex::new(None::<Child>));
+    let thread_child = Arc::clone(&active_child);
     let thread_output_dir = output_dir.clone();
     let item_ids = items.iter().map(|item| item.id).collect::<Vec<_>>();
 
@@ -111,6 +121,7 @@ pub fn start_audio_batch(
                 &item.settings,
                 &thread_output_dir,
                 &thread_cancel,
+                &thread_child,
                 item.id,
                 &sender,
             ) {
@@ -145,6 +156,7 @@ pub fn start_audio_batch(
         output_dir,
         item_ids,
         cancel_flag,
+        active_child,
     })
 }
 
@@ -159,6 +171,7 @@ fn compress_single_audio(
     settings: &AudioCompressionSettings,
     output_dir: &Path,
     cancel_flag: &Arc<AtomicBool>,
+    active_child: &Arc<Mutex<Option<Child>>>,
     id: u64,
     batch_sender: &mpsc::Sender<AudioBatchEvent>,
 ) -> Result<CompressionDisposition, String> {
@@ -172,7 +185,6 @@ fn compress_single_audio(
 
     let output_path = build_output_path(output_dir, metadata, &plan);
     let (job_sender, job_receiver) = mpsc::channel::<AudioProcessingProgress>();
-    let child = Arc::new(Mutex::new(None::<Child>));
     let started_at = Instant::now();
     let progress_cancel = Arc::clone(cancel_flag);
     let batch_tx = batch_sender.clone();
@@ -190,7 +202,7 @@ fn compress_single_audio(
         metadata.duration_secs,
         "Compressing audio",
         cancel_flag,
-        &child,
+        active_child,
         &job_sender,
     );
 
@@ -219,6 +231,14 @@ fn compress_single_audio(
         reduction_percent,
         elapsed_secs: started_at.elapsed().as_secs_f32(),
     }))
+}
+
+fn kill_active_child(active_child: &Arc<Mutex<Option<Child>>>) {
+    if let Ok(mut child_slot) = active_child.lock()
+        && let Some(child) = child_slot.as_mut()
+    {
+        let _ = child.kill();
+    }
 }
 
 fn build_output_path(

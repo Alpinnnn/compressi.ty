@@ -10,6 +10,7 @@ mod branding;
 mod icons;
 mod launch;
 mod modules;
+mod process_lifecycle;
 mod runtime;
 mod settings;
 mod single_instance;

@@ -18,8 +18,7 @@ pub(super) fn background_command(program: &Path) -> Command {
 }
 
 pub(super) fn run_capture(mut command: Command) -> Result<String, String> {
-    let output = command
-        .output()
+    let output = crate::process_lifecycle::output(&mut command)
         .map_err(|error| format!("Could not start process: {error}"))?;
 
     if !output.status.success() {

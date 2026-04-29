@@ -155,8 +155,7 @@ fn probe_hw_null(ffmpeg_path: &Path, encoder_name: &str) -> bool {
         .arg("null")
         .arg(null_device);
 
-    command
-        .output()
+    crate::process_lifecycle::output(&mut command)
         .map(|output| output.status.success())
         .unwrap_or(false)
 }
@@ -187,8 +186,7 @@ fn probe_hw_tempfile(ffmpeg_path: &Path, encoder_name: &str) -> bool {
         .arg(probe_pixel_format)
         .arg(&temp_file);
 
-    let result = command
-        .output()
+    let result = crate::process_lifecycle::output(&mut command)
         .map(|output| output.status.success())
         .unwrap_or(false);
 

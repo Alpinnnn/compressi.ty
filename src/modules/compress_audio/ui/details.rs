@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use eframe::egui::{self, Align, Button, Layout, RichText, Slider, Stroke, Ui, vec2};
+use eframe::egui::{self, Align, Button, Layout, RichText, ScrollArea, Slider, Stroke, Ui, vec2};
 
 use crate::{
     icons,
@@ -36,138 +36,164 @@ impl CompressAudioPage {
             self.preview_scrub_position = None;
         }
 
-        panel::card(theme)
-            .inner_margin(egui::Margin::same(12))
-            .show(ui, |ui| {
-                compact(ui);
-                ui.set_min_height((height - 24.0).max(0.0));
+        ui.allocate_ui_with_layout(
+            vec2(ui.available_width(), height.max(0.0)),
+            Layout::top_down(Align::Min),
+            |ui| {
+                panel::card(theme)
+                    .inner_margin(egui::Margin::same(12))
+                    .show(ui, |ui| {
+                        compact(ui);
+                        let inner_height = (height - 24.0).max(0.0);
+                        ui.set_min_height(inner_height);
 
-                let Some(selected_id) = self.selected_id else {
-                    render_panel_message(
-                        ui,
-                        theme,
-                        height,
-                        "Track Info",
-                        "Select an audio from the queue.",
-                    );
-                    return;
-                };
+                        ScrollArea::vertical()
+                            .id_salt("audio_track_details_scroll")
+                            .max_height(inner_height)
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                let Some(selected_id) = self.selected_id else {
+                                    render_panel_message(
+                                        ui,
+                                        theme,
+                                        height,
+                                        "Track Info",
+                                        "Select an audio from the queue.",
+                                    );
+                                    return;
+                                };
 
-                let Some(item) = self.find_item(selected_id).cloned() else {
-                    self.selected_id = None;
-                    self.preview_player.stop();
-                    self.preview_scrub_position = None;
-                    render_panel_message(
-                        ui,
-                        theme,
-                        height,
-                        "Track Info",
-                        "Select an audio from the queue.",
-                    );
-                    return;
-                };
+                                let Some(item) = self.find_item(selected_id).cloned() else {
+                                    self.selected_id = None;
+                                    self.preview_player.stop();
+                                    self.preview_scrub_position = None;
+                                    render_panel_message(
+                                        ui,
+                                        theme,
+                                        height,
+                                        "Track Info",
+                                        "Select an audio from the queue.",
+                                    );
+                                    return;
+                                };
 
-                let Some(metadata) = item.metadata.as_ref() else {
-                    render_panel_message(
-                        ui,
-                        theme,
-                        height,
-                        "Track Info",
-                        "Track details will be available after analysis finishes.",
-                    );
-                    return;
-                };
+                                let Some(metadata) = item.metadata.as_ref() else {
+                                    render_panel_message(
+                                        ui,
+                                        theme,
+                                        height,
+                                        "Track Info",
+                                        "Track details will be available after analysis finishes.",
+                                    );
+                                    return;
+                                };
 
-                ui.horizontal(|ui| {
-                    hint::title(
-                        ui,
-                        theme,
-                        "Track Info",
-                        14.0,
-                        Some("Metadata for the selected audio file."),
-                    );
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if let Some(analysis) = item.analysis.as_ref() {
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    RichText::new(format!(
-                                        "Auto Detection: {}",
-                                        analysis.headline.trim_start_matches("Detected ")
-                                    ))
-                                    .size(10.5)
-                                    .strong()
-                                    .color(theme.colors.accent),
-                                );
-                                hint::badge(ui, theme, &analysis.detail);
+                                ui.horizontal(|ui| {
+                                    hint::title(
+                                        ui,
+                                        theme,
+                                        "Track Info",
+                                        14.0,
+                                        Some("Metadata for the selected audio file."),
+                                    );
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        if let Some(analysis) = item.analysis.as_ref() {
+                                            ui.horizontal(|ui| {
+                                                ui.label(
+                                                    RichText::new(format!(
+                                                        "Auto Detection: {}",
+                                                        analysis
+                                                            .headline
+                                                            .trim_start_matches("Detected ")
+                                                    ))
+                                                    .size(10.5)
+                                                    .strong()
+                                                    .color(theme.colors.accent),
+                                                );
+                                                hint::badge(ui, theme, &analysis.detail);
+                                            });
+                                        }
+                                    });
+                                });
+                                ui.add_space(10.0);
+
+                                panel::inset(theme).show(ui, |ui| {
+                                    ui.set_width(ui.available_width());
+                                    ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+
+                                    ui.label(
+                                        RichText::new(truncate_filename(&item.file_name, 34))
+                                            .size(12.0)
+                                            .strong()
+                                            .color(theme.colors.fg),
+                                    );
+                                    render_preview_player(
+                                        ui,
+                                        theme,
+                                        &mut self.preview_player,
+                                        &mut self.preview_scrub_position,
+                                        item.id,
+                                        &item.source_path,
+                                        Duration::from_secs_f32(metadata.duration_secs.max(0.0)),
+                                    );
+                                    ui.add_space(4.0);
+                                    let response = egui::CollapsingHeader::new(
+                                        RichText::new("Track Info")
+                                            .size(11.5)
+                                            .strong()
+                                            .color(theme.colors.fg),
+                                    )
+                                    .id_salt("audio_track_info_details")
+                                    .default_open(false)
+                                    .show_unindented(ui, |ui| {
+                                        ui.add_space(2.0);
+                                        render_info_row(
+                                            ui,
+                                            theme,
+                                            "Status",
+                                            &status_text(&item.state),
+                                        );
+                                        render_info_row(
+                                            ui,
+                                            theme,
+                                            "Size",
+                                            &format_bytes(metadata.size_bytes),
+                                        );
+                                        render_info_row(
+                                            ui,
+                                            theme,
+                                            "Duration",
+                                            &format_duration(metadata.duration_secs),
+                                        );
+                                        render_info_row(
+                                            ui,
+                                            theme,
+                                            "Sample Rate",
+                                            &format_audio_sample_rate(metadata.sample_rate_hz),
+                                        );
+                                        render_info_row(
+                                            ui,
+                                            theme,
+                                            "Channels",
+                                            format_audio_channels(metadata.channels),
+                                        );
+                                        render_info_row(
+                                            ui,
+                                            theme,
+                                            "Source",
+                                            &format!(
+                                                "{} | {}",
+                                                metadata.codec_name.to_uppercase(),
+                                                metadata.container_name.to_uppercase()
+                                            ),
+                                        );
+                                    });
+                                    self.track_info_open = !response.fully_closed();
+                                });
                             });
-                        }
                     });
-                });
-                ui.add_space(10.0);
-
-                panel::inset(theme).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-
-                    ui.label(
-                        RichText::new(truncate_filename(&item.file_name, 34))
-                            .size(12.0)
-                            .strong()
-                            .color(theme.colors.fg),
-                    );
-                    render_preview_player(
-                        ui,
-                        theme,
-                        &mut self.preview_player,
-                        &mut self.preview_scrub_position,
-                        item.id,
-                        &item.source_path,
-                        Duration::from_secs_f32(metadata.duration_secs.max(0.0)),
-                    );
-                    ui.add_space(4.0);
-                    egui::CollapsingHeader::new(
-                        RichText::new("Track Info")
-                            .size(11.5)
-                            .strong()
-                            .color(theme.colors.fg),
-                    )
-                    .id_salt("audio_track_info_details")
-                    .default_open(true)
-                    .show_unindented(ui, |ui| {
-                        ui.add_space(2.0);
-                        render_info_row(ui, theme, "Status", &status_text(&item.state));
-                        render_info_row(ui, theme, "Size", &format_bytes(metadata.size_bytes));
-                        render_info_row(
-                            ui,
-                            theme,
-                            "Duration",
-                            &format_duration(metadata.duration_secs),
-                        );
-                        render_info_row(
-                            ui,
-                            theme,
-                            "Sample Rate",
-                            &format_audio_sample_rate(metadata.sample_rate_hz),
-                        );
-                        render_info_row(
-                            ui,
-                            theme,
-                            "Channels",
-                            format_audio_channels(metadata.channels),
-                        );
-                        render_info_row(
-                            ui,
-                            theme,
-                            "Source",
-                            &format!(
-                                "{} | {}",
-                                metadata.codec_name.to_uppercase(),
-                                metadata.container_name.to_uppercase()
-                            ),
-                        );
-                    });
-                });
-            });
+            },
+        );
     }
 }
 

@@ -129,8 +129,9 @@ impl AudioPreviewPlayer {
     fn load_track(&mut self, track_id: u64, path: &Path, start_paused: bool) -> Result<(), String> {
         self.stop();
 
-        let device_sink = DeviceSinkBuilder::open_default_sink()
+        let mut device_sink = DeviceSinkBuilder::open_default_sink()
             .map_err(|error| format!("Could not open the default audio output: {error}"))?;
+        device_sink.log_on_drop(false);
         let player = Player::connect_new(device_sink.mixer());
         if start_paused {
             player.pause();

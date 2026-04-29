@@ -98,8 +98,7 @@ pub fn generate_thumbnail(
         .arg("scale=120:-1")
         .arg(&thumb_path);
 
-    let output = command
-        .output()
+    let output = crate::process_lifecycle::output(&mut command)
         .map_err(|error| format!("Could not run FFmpeg for thumbnail: {error}"))?;
 
     if !output.status.success() {

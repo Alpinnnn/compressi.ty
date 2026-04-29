@@ -1,5 +1,5 @@
 use std::{
-    io::{BufRead, BufReader, Read},
+    io::{BufRead, BufReader},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
@@ -143,8 +143,11 @@ pub(super) fn run_encode_pass(
     shared_child: &Arc<Mutex<Option<Child>>>,
     sender: &mpsc::Sender<AudioProcessingProgress>,
 ) -> Result<(), String> {
-    let mut child = command
-        .spawn()
+    if cancel_flag.load(Ordering::Relaxed) {
+        return Err("cancelled".to_owned());
+    }
+
+    let mut child = crate::process_lifecycle::spawn_child(&mut command)
         .map_err(|error| format!("Could not start FFmpeg: {error}"))?;
     let stdout = child
         .stdout
@@ -163,14 +166,27 @@ pub(super) fn run_encode_pass(
     let reader = BufReader::new(stdout);
     let mut progress_parser = ProgressParser::default();
     let mut latest_speed = 0.0_f32;
+    let mut cancelled = cancel_flag.load(Ordering::Relaxed);
+    let mut read_error = None;
+    if cancelled {
+        kill_active_child(shared_child);
+    }
 
     for line in reader.lines() {
         if cancel_flag.load(Ordering::Relaxed) {
+            cancelled = true;
             kill_active_child(shared_child);
-            return Err("cancelled".to_owned());
+            break;
         }
 
-        let line = line.map_err(|error| format!("Could not read FFmpeg progress: {error}"))?;
+        let line = match line {
+            Ok(line) => line,
+            Err(error) => {
+                read_error = Some(format!("Could not read FFmpeg progress: {error}"));
+                kill_active_child(shared_child);
+                break;
+            }
+        };
         if let Some(snapshot) = progress_parser.push_line(&line) {
             latest_speed = snapshot.speed_x.max(latest_speed);
             let progress = if total_duration_secs <= 0.0 {
@@ -193,6 +209,11 @@ pub(super) fn run_encode_pass(
         }
     }
 
+    if cancel_flag.load(Ordering::Relaxed) {
+        cancelled = true;
+        kill_active_child(shared_child);
+    }
+
     let stderr_output = stderr_handle
         .join()
         .map_err(|_| "Could not read FFmpeg error output.".to_owned())?;
@@ -209,8 +230,12 @@ pub(super) fn run_encode_pass(
             .map_err(|error| format!("Could not wait for FFmpeg: {error}"))?
     };
 
-    if cancel_flag.load(Ordering::Relaxed) {
+    if cancelled {
         return Err("cancelled".to_owned());
+    }
+
+    if let Some(error) = read_error {
+        return Err(error);
     }
 
     if !status.success() {
@@ -255,8 +280,7 @@ fn background_command(program: &Path) -> Command {
 }
 
 fn run_capture(mut command: Command) -> Result<String, String> {
-    let output = command
-        .output()
+    let output = crate::process_lifecycle::output(&mut command)
         .map_err(|error| format!("Could not start process: {error}"))?;
 
     if !output.status.success() {
@@ -271,11 +295,8 @@ fn run_capture(mut command: Command) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-fn read_stream<R: Read>(reader: R) -> String {
-    let mut buffer = String::new();
-    let mut reader = BufReader::new(reader);
-    let _ = reader.read_to_string(&mut buffer);
-    buffer
+fn read_stream<R: std::io::Read>(reader: R) -> String {
+    crate::process_lifecycle::read_pipe_to_string(reader)
 }
 
 #[cfg(test)]

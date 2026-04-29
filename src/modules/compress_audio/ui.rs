@@ -22,6 +22,11 @@ use crate::{
 use self::chrome::render_banner;
 pub(super) use super::{BannerMessage, BannerTone, CompressAudioPage};
 
+const MEDIA_PANEL_GAP: f32 = 12.0;
+const DETAILS_COLLAPSED_HEIGHT: f32 = 168.0;
+const DETAILS_EXPANDED_HEIGHT: f32 = 320.0;
+const DROP_ZONE_MIN_HEIGHT: f32 = 132.0;
+
 pub(super) fn flush(ui: &mut Ui) {
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
 }
@@ -51,6 +56,25 @@ pub(super) fn is_audio_settings_editable(state: &AudioCompressionState) -> bool 
 }
 
 impl CompressAudioPage {
+    fn media_panel_heights(&self, available_height: f32) -> (f32, f32) {
+        let preferred_details_height = if self.track_info_open {
+            DETAILS_EXPANDED_HEIGHT
+        } else {
+            DETAILS_COLLAPSED_HEIGHT
+        };
+        let max_details_height =
+            (available_height - MEDIA_PANEL_GAP - DROP_ZONE_MIN_HEIGHT).max(0.0);
+        let details_height = preferred_details_height.min(max_details_height).max(0.0);
+        let gap = if details_height > 0.0 {
+            MEDIA_PANEL_GAP
+        } else {
+            0.0
+        };
+        let drop_height = (available_height - details_height - gap).max(0.0);
+
+        (drop_height, details_height)
+    }
+
     fn pick_audio_files(&mut self, engine: &mut VideoEngineController) {
         if let Some(paths) = rfd::FileDialog::new()
             .add_filter(
@@ -157,7 +181,7 @@ impl CompressAudioPage {
                     let center_width = usable_width * 0.38;
                     let queue_actions_height = 108.0;
                     let queue_height = (workspace_height - queue_actions_height - 12.0).max(0.0);
-                    let media_panel_height = ((workspace_height - 12.0) * 0.5).max(0.0);
+                    let (drop_height, details_height) = self.media_panel_heights(workspace_height);
 
                     ui.allocate_ui_with_layout(
                         vec2(queue_width, workspace_height),
@@ -175,9 +199,11 @@ impl CompressAudioPage {
                         Layout::top_down(Align::Min),
                         |ui| {
                             flush(ui);
-                            self.render_drop_zone(ui, ctx, theme, media_panel_height, engine);
-                            ui.add_space(12.0);
-                            self.render_details_panel(ui, theme, media_panel_height, engine);
+                            self.render_drop_zone(ui, ctx, theme, drop_height, engine);
+                            if details_height > 0.0 {
+                                ui.add_space(MEDIA_PANEL_GAP);
+                                self.render_details_panel(ui, theme, details_height, engine);
+                            }
                         },
                     );
                     ui.add_space(gutter);
@@ -194,29 +220,36 @@ impl CompressAudioPage {
             );
         } else {
             let drop_height = if has_files {
-                (workspace_height * 0.22)
-                    .max(150.0)
-                    .min(((workspace_height - 24.0) * 0.5).max(0.0))
+                let media_height = (workspace_height * 0.54)
+                    .max(DROP_ZONE_MIN_HEIGHT + DETAILS_COLLAPSED_HEIGHT + MEDIA_PANEL_GAP)
+                    .min(workspace_height);
+                let (drop_height, _) = self.media_panel_heights(media_height);
+                drop_height
             } else {
-                workspace_height * 0.45
+                workspace_height
             };
             self.render_drop_zone(&mut content_ui, ctx, theme, drop_height.max(0.0), engine);
             if has_files {
-                content_ui.add_space(12.0);
-                let details_height = drop_height;
+                content_ui.add_space(MEDIA_PANEL_GAP);
+                let media_height = (workspace_height * 0.54)
+                    .max(DROP_ZONE_MIN_HEIGHT + DETAILS_COLLAPSED_HEIGHT + MEDIA_PANEL_GAP)
+                    .min(workspace_height);
+                let (_, details_height) = self.media_panel_heights(media_height);
                 self.render_details_panel(&mut content_ui, theme, details_height, engine);
-                content_ui.add_space(12.0);
+                content_ui.add_space(MEDIA_PANEL_GAP);
                 let remaining_height =
-                    (workspace_height - drop_height - details_height - 24.0).max(0.0);
+                    (workspace_height - drop_height - details_height - MEDIA_PANEL_GAP * 2.0)
+                        .max(0.0);
                 let actions_height = ((remaining_height * 0.20).clamp(60.0, 96.0))
-                    .min((remaining_height - 12.0).max(0.0));
-                let queue_and_settings_height = (remaining_height - actions_height - 12.0).max(0.0);
+                    .min((remaining_height - MEDIA_PANEL_GAP).max(0.0));
+                let queue_and_settings_height =
+                    (remaining_height - actions_height - MEDIA_PANEL_GAP).max(0.0);
                 let queue_height = queue_and_settings_height * 0.38;
                 let settings_height = queue_and_settings_height - queue_height;
                 self.render_queue(&mut content_ui, theme, queue_height, engine);
-                content_ui.add_space(12.0);
+                content_ui.add_space(MEDIA_PANEL_GAP);
                 self.render_actions(&mut content_ui, theme, actions_height.max(0.0), engine);
-                content_ui.add_space(12.0);
+                content_ui.add_space(MEDIA_PANEL_GAP);
                 self.render_settings_panel(
                     &mut content_ui,
                     theme,

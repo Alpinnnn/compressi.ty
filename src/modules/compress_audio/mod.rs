@@ -41,6 +41,7 @@ pub struct CompressAudioPage {
     show_cancel_all_confirm: bool,
     preview_player: AudioPreviewPlayer,
     preview_scrub_position: Option<(u64, f32)>,
+    track_info_open: bool,
 }
 
 struct PendingProbe {
@@ -82,6 +83,7 @@ impl Default for CompressAudioPage {
             show_cancel_all_confirm: false,
             preview_player: AudioPreviewPlayer::default(),
             preview_scrub_position: None,
+            track_info_open: false,
         }
     }
 }
