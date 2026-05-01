@@ -8,6 +8,7 @@ use crate::{
     modules::{
         ModuleKind,
         compress_audio::CompressAudioPage,
+        compress_documents::CompressDocumentsPage,
         compress_photos::CompressPhotosPage,
         compress_videos::{CompressVideosPage, engine::VideoEngineController},
     },
@@ -20,6 +21,7 @@ use crate::{
 pub struct CompressityApp {
     active_module: Option<ModuleKind>,
     compress_audio: CompressAudioPage,
+    compress_documents: CompressDocumentsPage,
     compress_photos: CompressPhotosPage,
     compress_videos: CompressVideosPage,
     show_about: bool,
@@ -61,6 +63,7 @@ impl CompressityApp {
         Self {
             active_module,
             compress_audio: CompressAudioPage::default(),
+            compress_documents: CompressDocumentsPage::default(),
             compress_photos: CompressPhotosPage::default(),
             compress_videos: CompressVideosPage::default(),
             show_about: false,
@@ -105,6 +108,11 @@ impl CompressityApp {
             self.compress_photos.queue_external_paths(photo_paths);
         }
 
+        if self.pending_launch_import.has_document_paths() {
+            let document_paths = self.pending_launch_import.take_document_paths();
+            self.compress_documents.queue_external_paths(document_paths);
+        }
+
         if self.pending_launch_import.has_video_paths() && self.video_engine.active_info().is_some()
         {
             let video_paths = self.pending_launch_import.take_video_paths();
@@ -124,6 +132,7 @@ impl CompressityApp {
         }
 
         if self.compress_audio.is_compressing()
+            || self.compress_documents.is_compressing()
             || self.compress_photos.is_compressing()
             || self.compress_videos.is_compressing()
         {
@@ -208,6 +217,7 @@ impl CompressityApp {
 
                         if exit.clicked() {
                             self.compress_audio.cancel_compression();
+                            self.compress_documents.cancel_compression();
                             self.compress_photos.cancel_compression();
                             self.compress_videos.cancel_compression();
                             self.show_exit_confirm = false;
@@ -233,6 +243,7 @@ impl eframe::App for CompressityApp {
             self.compress_audio.poll_background(&mut self.video_engine),
         );
         self.apply_pending_launch_import();
+        Self::request_repaint_if_needed(ctx, self.compress_documents.poll_background());
         Self::request_repaint_if_needed(ctx, self.compress_photos.poll_background());
         Self::request_repaint_if_needed(
             ctx,
@@ -244,6 +255,7 @@ impl eframe::App for CompressityApp {
         self.handle_close_request(ctx);
 
         if !self.compress_audio.is_compressing()
+            && !self.compress_documents.is_compressing()
             && !self.compress_photos.is_compressing()
             && !self.compress_videos.is_compressing()
         {
@@ -264,6 +276,13 @@ impl eframe::App for CompressityApp {
                         &mut self.active_module,
                         &self.app_settings,
                         &mut self.video_engine,
+                    ),
+                    Some(ModuleKind::CompressDocuments) => self.compress_documents.show(
+                        ui,
+                        ctx,
+                        &self.theme,
+                        &mut self.active_module,
+                        &self.app_settings,
                     ),
                     Some(ModuleKind::CompressPhotos) => self.compress_photos.show(
                         ui,

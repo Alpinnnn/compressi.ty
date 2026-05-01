@@ -1,4 +1,5 @@
 pub mod compress_audio;
+pub mod compress_documents;
 pub mod compress_photos;
 pub mod compress_videos;
 
@@ -44,7 +45,7 @@ impl ModuleKind {
             Self::CompressDocuments => ModuleSpec {
                 icon: IconKind::Documents,
                 title: "Compress Documents",
-                detail: "Optimize PDFs and office documents into smaller, easier-to-send files once the document pipeline is ready.",
+                detail: "Compress PDFs, Office files, OpenDocument packages, EPUBs, XPS, and Visio documents in a queue-based workflow.",
                 accent: Color32::from_rgb(196, 196, 192),
             },
             Self::CompressPhotos => ModuleSpec {

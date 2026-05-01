@@ -59,6 +59,11 @@ pub fn default_audio_output_root() -> PathBuf {
     default_output_root().join("audio")
 }
 
+/// Returns the default base folder used for generated document compression outputs.
+pub fn default_document_output_root() -> PathBuf {
+    default_output_root().join("documents")
+}
+
 pub fn collect_matching_paths<F>(paths: Vec<PathBuf>, predicate: F) -> Vec<PathBuf>
 where
     F: Fn(&Path) -> bool,

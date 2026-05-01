@@ -4,7 +4,8 @@ use std::{
 };
 
 use crate::modules::{
-    ModuleKind, compress_audio, compress_photos::models::PhotoFormat, compress_videos::processor,
+    ModuleKind, compress_audio, compress_documents, compress_photos::models::PhotoFormat,
+    compress_videos::processor,
 };
 
 const IPC_MAGIC: &str = "COMPRESSITY_LAUNCH_V1";
@@ -14,6 +15,7 @@ const IPC_MAGIC: &str = "COMPRESSITY_LAUNCH_V1";
 pub struct LaunchImport {
     preferred_module: Option<ModuleKind>,
     audio_paths: Vec<PathBuf>,
+    document_paths: Vec<PathBuf>,
     photo_paths: Vec<PathBuf>,
     video_paths: Vec<PathBuf>,
 }
@@ -46,6 +48,7 @@ impl LaunchImport {
 
             match module {
                 ModuleKind::CompressAudio => launch_import.audio_paths.push(path),
+                ModuleKind::CompressDocuments => launch_import.document_paths.push(path),
                 ModuleKind::CompressPhotos => launch_import.photo_paths.push(path),
                 ModuleKind::CompressVideos => launch_import.video_paths.push(path),
                 _ => {}
@@ -61,6 +64,7 @@ impl LaunchImport {
             self.preferred_module = Some(module);
         }
         self.audio_paths.append(&mut other.audio_paths);
+        self.document_paths.append(&mut other.document_paths);
         self.photo_paths.append(&mut other.photo_paths);
         self.video_paths.append(&mut other.video_paths);
     }
@@ -80,6 +84,11 @@ impl LaunchImport {
         !self.photo_paths.is_empty()
     }
 
+    /// Returns true when there are startup document files waiting to be imported.
+    pub fn has_document_paths(&self) -> bool {
+        !self.document_paths.is_empty()
+    }
+
     /// Returns true when there are startup video files waiting to be imported.
     pub fn has_video_paths(&self) -> bool {
         !self.video_paths.is_empty()
@@ -93,6 +102,11 @@ impl LaunchImport {
     /// Drains all pending startup photo paths.
     pub fn take_photo_paths(&mut self) -> Vec<PathBuf> {
         mem::take(&mut self.photo_paths)
+    }
+
+    /// Drains all pending startup document paths.
+    pub fn take_document_paths(&mut self) -> Vec<PathBuf> {
+        mem::take(&mut self.document_paths)
     }
 
     /// Drains all pending startup video paths.
@@ -114,6 +128,12 @@ impl LaunchImport {
         for path in &self.audio_paths {
             payload.push('\n');
             payload.push_str("A\t");
+            payload.push_str(&path.to_string_lossy());
+        }
+
+        for path in &self.document_paths {
+            payload.push('\n');
+            payload.push_str("D\t");
             payload.push_str(&path.to_string_lossy());
         }
 
@@ -152,6 +172,7 @@ impl LaunchImport {
                     }
                 }
                 "A" => launch_import.audio_paths.push(PathBuf::from(value)),
+                "D" => launch_import.document_paths.push(PathBuf::from(value)),
                 "P" => launch_import.photo_paths.push(PathBuf::from(value)),
                 "V" => launch_import.video_paths.push(PathBuf::from(value)),
                 _ => {}
@@ -161,6 +182,8 @@ impl LaunchImport {
         if launch_import.preferred_module.is_none() {
             launch_import.preferred_module = if !launch_import.audio_paths.is_empty() {
                 Some(ModuleKind::CompressAudio)
+            } else if !launch_import.document_paths.is_empty() {
+                Some(ModuleKind::CompressDocuments)
             } else if !launch_import.photo_paths.is_empty() {
                 Some(ModuleKind::CompressPhotos)
             } else if !launch_import.video_paths.is_empty() {
@@ -183,6 +206,10 @@ fn supported_module_for_path(path: &Path) -> Option<ModuleKind> {
         return Some(ModuleKind::CompressPhotos);
     }
 
+    if compress_documents::is_supported_document_path(path) {
+        return Some(ModuleKind::CompressDocuments);
+    }
+
     if processor::is_supported_video_path(path) {
         return Some(ModuleKind::CompressVideos);
     }
@@ -194,6 +221,7 @@ fn supported_module_for_path(path: &Path) -> Option<ModuleKind> {
 fn module_to_ipc_name(module: ModuleKind) -> Option<&'static str> {
     match module {
         ModuleKind::CompressAudio => Some("audio"),
+        ModuleKind::CompressDocuments => Some("documents"),
         ModuleKind::CompressPhotos => Some("photos"),
         ModuleKind::CompressVideos => Some("videos"),
         _ => None,
@@ -203,6 +231,7 @@ fn module_to_ipc_name(module: ModuleKind) -> Option<&'static str> {
 fn module_from_ipc_name(value: &str) -> Option<ModuleKind> {
     match value {
         "audio" => Some(ModuleKind::CompressAudio),
+        "documents" => Some(ModuleKind::CompressDocuments),
         "photos" => Some(ModuleKind::CompressPhotos),
         "videos" => Some(ModuleKind::CompressVideos),
         _ => None,

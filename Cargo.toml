@@ -10,6 +10,7 @@ eframe = { version = "0.31", default-features = false, features = ["accesskit", 
 ffmpeg-sidecar = "2.4"
 image = { version = "0.25", features = ["avif", "webp"] }
 img-parts = "0.4"
+lopdf = "0.40"
 mozjpeg = "0.10"
 open = "5.3"
 rayon = "1.10"
@@ -17,6 +18,7 @@ resvg = "0.47"
 rfd = "0.15"
 rodio = { version = "0.22", default-features = false, features = ["playback", "symphonia-all"] }
 webp = "0.3"
+zip = "8.6"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }

@@ -9,6 +9,7 @@ pub struct AppSettings {
     pub photo_output_folder: Option<PathBuf>,
     pub audio_output_folder: Option<PathBuf>,
     pub video_output_folder: Option<PathBuf>,
+    pub document_output_folder: Option<PathBuf>,
     pub use_hardware_acceleration: bool,
 }
 
@@ -19,6 +20,7 @@ impl Default for AppSettings {
             photo_output_folder: None,
             audio_output_folder: None,
             video_output_folder: None,
+            document_output_folder: None,
             use_hardware_acceleration: true,
         }
     }
@@ -78,6 +80,13 @@ impl AppSettings {
             .or_else(|| self.default_output_folder.clone())
     }
 
+    /// Returns the document output override, or the shared default output folder when unset.
+    pub fn preferred_document_output_folder(&self) -> Option<PathBuf> {
+        self.document_output_folder
+            .clone()
+            .or_else(|| self.default_output_folder.clone())
+    }
+
     /// Returns the audio output override, or the shared default output folder when unset.
     pub fn preferred_audio_output_folder(&self) -> Option<PathBuf> {
         self.audio_output_folder
@@ -87,11 +96,12 @@ impl AppSettings {
 
     fn to_json(&self) -> Result<String, ()> {
         Ok(format!(
-            "{{\"default_output_folder\":{},\"photo_output_folder\":{},\"audio_output_folder\":{},\"video_output_folder\":{},\"use_hardware_acceleration\":{}}}",
+            "{{\"default_output_folder\":{},\"photo_output_folder\":{},\"audio_output_folder\":{},\"video_output_folder\":{},\"document_output_folder\":{},\"use_hardware_acceleration\":{}}}",
             path_to_json_value(self.default_output_folder.as_ref()),
             path_to_json_value(self.photo_output_folder.as_ref()),
             path_to_json_value(self.audio_output_folder.as_ref()),
             path_to_json_value(self.video_output_folder.as_ref()),
+            path_to_json_value(self.document_output_folder.as_ref()),
             if self.use_hardware_acceleration {
                 "true"
             } else {
@@ -112,6 +122,8 @@ impl AppSettings {
             photo_output_folder: parse_optional_path_field(text, "photo_output_folder").ok()?,
             audio_output_folder: parse_optional_path_field(text, "audio_output_folder").ok()?,
             video_output_folder: parse_optional_path_field(text, "video_output_folder").ok()?,
+            document_output_folder: parse_optional_path_field(text, "document_output_folder")
+                .ok()?,
             use_hardware_acceleration: parse_optional_bool_field(text, "use_hardware_acceleration")
                 .ok()?
                 .unwrap_or(true),
@@ -223,6 +235,7 @@ mod tests {
         assert_eq!(settings.photo_output_folder, None);
         assert_eq!(settings.audio_output_folder, None);
         assert_eq!(settings.video_output_folder, None);
+        assert_eq!(settings.document_output_folder, None);
         assert!(settings.use_hardware_acceleration);
     }
 
@@ -233,6 +246,7 @@ mod tests {
             photo_output_folder: Some(PathBuf::from(r"D:\Photos")),
             audio_output_folder: Some(PathBuf::from(r"F:\Audio")),
             video_output_folder: Some(PathBuf::from(r"E:\Videos")),
+            document_output_folder: Some(PathBuf::from(r"G:\Documents")),
             use_hardware_acceleration: false,
         };
 

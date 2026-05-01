@@ -37,7 +37,7 @@ pub(super) fn render_output_settings(ui: &mut Ui, theme: &AppTheme, settings: &m
 
             ui.add_space(14.0);
 
-            egui::CollapsingHeader::new("Photo, Audio & Video Overrides")
+            egui::CollapsingHeader::new("Photo, Audio, Video & Document Overrides")
                 .id_salt("settings_output_overrides")
                 .default_open(false)
                 .show(ui, |ui| {
@@ -110,6 +110,30 @@ pub(super) fn render_output_settings(ui: &mut Ui, theme: &AppTheme, settings: &m
                         "Overrides the default output location for Compress Videos. Files are saved directly into this folder.",
                         &mut settings.video_output_folder,
                         &video_fallback,
+                        "Use Default Output Folder",
+                    );
+
+                    ui.add_space(14.0);
+
+                    let document_fallback = settings
+                        .default_output_folder
+                        .as_ref()
+                        .map(|dir| {
+                            format!("Not set - uses Default Output Folder ({})", dir.display())
+                        })
+                        .unwrap_or_else(|| {
+                            format!(
+                                "Not set - uses {}",
+                                runtime::default_document_output_root().display()
+                            )
+                        });
+                    render_output_folder_field(
+                        ui,
+                        theme,
+                        "Document Output Folder",
+                        "Overrides the default output location for Compress Documents. Leave empty to follow Default Output Folder.",
+                        &mut settings.document_output_folder,
+                        &document_fallback,
                         "Use Default Output Folder",
                     );
                 });

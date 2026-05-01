@@ -5,7 +5,7 @@
 <h1 align="center">Compressi.ty</h1>
 
 <p align="center">
-  Local-first desktop compression toolkit for photos and videos.
+  Local-first desktop compression toolkit for photos, videos, audio, and documents.
 </p>
 
 Compressi.ty is a native desktop application built with Rust and `eframe/egui`. It is designed around on-device processing, modular feature workspaces, and a packaging flow that can ship the video runtime with the app instead of requiring users to install FFmpeg manually.
@@ -14,7 +14,7 @@ Compressi.ty is a native desktop application built with Rust and `eframe/egui`. 
 
 - Local-first by default. Compression runs on the user's machine with no cloud dependency.
 - Native desktop UI. The application ships as a Rust desktop app with custom theming, fonts, and branding assets.
-- Real workflows available today. The repository already includes working photo and video compression modules.
+- Real workflows available today. The repository already includes working photo, video, audio, and document compression modules.
 - Built to expand. Additional workspaces for file compression, folder compression, and archive/extract already have routed UI shells in place.
 - Distribution ready. Windows and Linux packaging scripts produce portable bundles and installer-ready outputs.
 
@@ -24,6 +24,7 @@ Compressi.ty is a native desktop application built with Rust and `eframe/egui`. 
 | --- | --- | --- |
 | Compress Photos | Available | Batch image compression, presets, advanced controls, output management, preview workspace |
 | Compress Videos | Available | Batch video compression, metadata probing, thumbnails, live estimates, FFmpeg runtime management |
+| Compress Documents | Available | Batch PDF and ZIP-package document compression with single-item and bulk workflows |
 | Settings | Available | Default output folder, engine inventory, managed FFmpeg updates |
 | Compress Files | Planned shell | Menu entry and routed shell exist, workflow not implemented yet |
 | Compress Folder | Planned shell | Menu entry and routed shell exist, workflow not implemented yet |
@@ -53,6 +54,15 @@ Compressi.ty is a native desktop application built with Rust and `eframe/egui`. 
 - Codec detection for `H.264`, `H.265/HEVC`, and `AV1`, with automatic fallback if an encoder is unavailable
 - Sequential batch compression with live progress, ETA, and output summaries
 - `MP4` output container with audio preserved when present
+
+### Compress Documents
+
+- Supported input formats: `PDF`, `DOCX`, `DOCM`, `DOTX`, `DOTM`, `XLSX`, `XLSM`, `XLTX`, `XLTM`, `XLAM`, `PPTX`, `PPTM`, `POTX`, `POTM`, `PPSX`, `PPSM`, `PPAM`, `SLDX`, `SLDM`, `ODT`, `OTT`, `OTH`, `ODM`, `ODS`, `OTS`, `ODP`, `OTP`, `ODG`, `OTG`, `ODF`, `ODC`, `ODI`, `ODB`, `EPUB`, `XPS`, `OXPS`, `VSDX`, `VSDM`, `VSSTX`, `VSSTM`, `VSSX`, `VSSM`, `VSTX`, `VSTM`
+- Drag-and-drop and file picker queue with per-row single compression or full batch compression
+- Presets: `Maximum Compatibility`, `Balanced`, `High Compression`, `Ultra Compression`
+- PDF optimization uses Rust-native `lopdf` stream compression and optional object/xref streams
+- Office, OpenDocument, EPUB, XPS, and Visio files use ZIP deflate repacking through `zip-rs`
+- OpenDocument and EPUB packages preserve the required uncompressed first `mimetype` entry
 - Engine discovery order: managed update, bundled runtime, then system `PATH`
 
 ## Architecture
@@ -69,6 +79,7 @@ src/
   settings.rs                  Persistent JSON application settings
   modules/
     compress_photos/           Image models, compressor, and egui workspace
+    compress_documents/        Document models, processor, and egui workspace
     compress_videos/           FFmpeg engine, processor, models, and egui workspace
   ui/                          Main menu, settings screen, and placeholder module shell
 packaging/
@@ -94,6 +105,7 @@ The repository already follows a clear split that is easy to extend:
   `Downloads -> Pictures -> Documents -> Home -> temp fallback`
 - Default generated output folders:
   - Photos: `compressi.ty-output/photos/run-<timestamp>/`
+  - Documents: `compressi.ty-output/documents/run-<timestamp>/`
   - Videos: `compressi.ty-output/videos/run-<timestamp>/`
 - Managed FFmpeg updates are stored in local app data so installed application folders can remain read-only
 
