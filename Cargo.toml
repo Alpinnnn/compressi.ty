@@ -10,7 +10,6 @@ eframe = { version = "0.31", default-features = false, features = ["accesskit", 
 ffmpeg-sidecar = "2.4"
 image = { version = "0.25", features = ["avif", "webp"] }
 img-parts = "0.4"
-lopdf = "0.40"
 mozjpeg = "0.10"
 open = "5.3"
 rayon = "1.10"

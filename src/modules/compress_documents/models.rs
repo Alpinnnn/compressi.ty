@@ -119,10 +119,10 @@ impl DocumentCompressionPreset {
     /// Returns the supporting copy shown beside the preset.
     pub fn description(self) -> &'static str {
         match self {
-            Self::MaximumCompatibility => "Gentle lossless optimization for older readers.",
-            Self::Balanced => "Everyday smaller files with modern-safe defaults.",
-            Self::HighCompression => "Stronger ZIP and PDF stream compression.",
-            Self::UltraCompression => "Slowest setting for the smallest Rust-native output.",
+            Self::MaximumCompatibility => "Lossless structural cleanup for older readers.",
+            Self::Balanced => "Everyday image-aware compression with readable output.",
+            Self::HighCompression => "Stronger PDF downsampling and media recompression.",
+            Self::UltraCompression => "Aggressive image reduction for the smallest files.",
         }
     }
 
@@ -132,18 +132,34 @@ impl DocumentCompressionPreset {
             Self::MaximumCompatibility => DocumentPresetDefaults {
                 compression_level: 4,
                 pdf_object_streams: false,
+                pdf_image_quality: 100,
+                pdf_image_resolution_dpi: 300,
+                package_image_quality: 100,
+                package_image_resize_percent: 100,
             },
             Self::Balanced => DocumentPresetDefaults {
-                compression_level: 6,
+                compression_level: 7,
                 pdf_object_streams: true,
+                pdf_image_quality: 82,
+                pdf_image_resolution_dpi: 160,
+                package_image_quality: 82,
+                package_image_resize_percent: 100,
             },
             Self::HighCompression => DocumentPresetDefaults {
                 compression_level: 8,
                 pdf_object_streams: true,
+                pdf_image_quality: 68,
+                pdf_image_resolution_dpi: 120,
+                package_image_quality: 68,
+                package_image_resize_percent: 88,
             },
             Self::UltraCompression => DocumentPresetDefaults {
                 compression_level: 9,
                 pdf_object_streams: true,
+                pdf_image_quality: 52,
+                pdf_image_resolution_dpi: 96,
+                package_image_quality: 52,
+                package_image_resize_percent: 72,
             },
         }
     }
@@ -154,6 +170,10 @@ impl DocumentCompressionPreset {
 pub struct DocumentPresetDefaults {
     pub compression_level: u8,
     pub pdf_object_streams: bool,
+    pub pdf_image_quality: u8,
+    pub pdf_image_resolution_dpi: u16,
+    pub package_image_quality: u8,
+    pub package_image_resize_percent: u8,
 }
 
 /// Editable settings for the current document batch.
@@ -163,6 +183,10 @@ pub struct DocumentCompressionSettings {
     pub advanced_mode: bool,
     pub compression_level: u8,
     pub pdf_object_streams: bool,
+    pub pdf_image_quality: u8,
+    pub pdf_image_resolution_dpi: u16,
+    pub package_image_quality: u8,
+    pub package_image_resize_percent: u8,
 }
 
 impl Default for DocumentCompressionSettings {
@@ -174,6 +198,10 @@ impl Default for DocumentCompressionSettings {
             advanced_mode: false,
             compression_level: defaults.compression_level,
             pdf_object_streams: defaults.pdf_object_streams,
+            pdf_image_quality: defaults.pdf_image_quality,
+            pdf_image_resolution_dpi: defaults.pdf_image_resolution_dpi,
+            package_image_quality: defaults.package_image_quality,
+            package_image_resize_percent: defaults.package_image_resize_percent,
         }
     }
 }
@@ -185,6 +213,10 @@ impl DocumentCompressionSettings {
         self.preset = preset;
         self.compression_level = defaults.compression_level;
         self.pdf_object_streams = defaults.pdf_object_streams;
+        self.pdf_image_quality = defaults.pdf_image_quality;
+        self.pdf_image_resolution_dpi = defaults.pdf_image_resolution_dpi;
+        self.package_image_quality = defaults.package_image_quality;
+        self.package_image_resize_percent = defaults.package_image_resize_percent;
     }
 
     /// Returns a PDF-compatible zlib compression level.
@@ -195,6 +227,36 @@ impl DocumentCompressionSettings {
     /// Returns a ZIP-compatible deflate compression level.
     pub fn zip_compression_level(&self) -> i64 {
         i64::from(self.compression_level.clamp(0, 9))
+    }
+
+    /// Returns a bounded PDF image quality for external PDF engines.
+    pub fn pdf_image_quality(&self) -> u8 {
+        self.pdf_image_quality.clamp(35, 100)
+    }
+
+    /// Returns a bounded target DPI for external PDF image downsampling.
+    pub fn pdf_image_resolution_dpi(&self) -> u16 {
+        self.pdf_image_resolution_dpi.clamp(72, 300)
+    }
+
+    /// Returns true when PDF compression may use lossy image optimization.
+    pub fn pdf_image_optimization_enabled(&self) -> bool {
+        self.pdf_image_quality() < 100 || self.pdf_image_resolution_dpi() < 300
+    }
+
+    /// Returns a bounded JPEG quality for media embedded in ZIP packages.
+    pub fn package_image_quality(&self) -> u8 {
+        self.package_image_quality.clamp(35, 100)
+    }
+
+    /// Returns a bounded resize percentage for media embedded in ZIP packages.
+    pub fn package_image_resize_percent(&self) -> u8 {
+        self.package_image_resize_percent.clamp(40, 100)
+    }
+
+    /// Returns true when package media should be decoded and recompressed.
+    pub fn package_image_optimization_enabled(&self) -> bool {
+        self.package_image_quality() < 100 || self.package_image_resize_percent() < 100
     }
 }
 
@@ -292,5 +354,11 @@ mod tests {
         assert!(settings.pdf_object_streams);
         assert_eq!(settings.pdf_compression_level(), 9);
         assert_eq!(settings.zip_compression_level(), 9);
+        assert_eq!(settings.pdf_image_quality(), 52);
+        assert_eq!(settings.pdf_image_resolution_dpi(), 96);
+        assert!(settings.pdf_image_optimization_enabled());
+        assert_eq!(settings.package_image_quality(), 52);
+        assert_eq!(settings.package_image_resize_percent(), 72);
+        assert!(settings.package_image_optimization_enabled());
     }
 }

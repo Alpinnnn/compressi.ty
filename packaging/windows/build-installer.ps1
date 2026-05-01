@@ -15,7 +15,12 @@ $bundledVariantStageDir = Join-Path $windowsDistRoot "Compressi.ty-bundled"
 $noEngineStageDir = Join-Path $windowsDistRoot "Compressi.ty-no-engine"
 $installerDir = Join-Path $windowsDistRoot "installer"
 $engineCache = Join-Path $windowsDistRoot "engine-cache"
+$documentEngineCache = Join-Path $windowsDistRoot "document-engine-cache"
 $setupIconPath = Join-Path $repoRoot "assets\\icon\\icon.ico"
+$ghostscriptVersion = "10.07.0"
+$ghostscriptTag = "gs10070"
+$ghostscriptInstaller = "gs10070w64.exe"
+$ghostscriptDownloadUrl = "https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/$ghostscriptTag/$ghostscriptInstaller"
 
 function Get-AppVersion {
     $line = Select-String -Path (Join-Path $repoRoot "Cargo.toml") -Pattern '^version = "(.*)"$' | Select-Object -First 1
@@ -124,6 +129,51 @@ function Ensure-EngineCache {
     }
 }
 
+function Ensure-DocumentEngineCache {
+    $downloadRoot = Join-Path $documentEngineCache "download"
+    $installRoot = Join-Path $documentEngineCache "install"
+    $installerPath = Join-Path $downloadRoot $ghostscriptInstaller
+
+    if ($RefreshEngine) {
+        Remove-Item $downloadRoot -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $installRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    New-Item -ItemType Directory -Force -Path $downloadRoot | Out-Null
+
+    if (-not (Test-Path $installerPath)) {
+        Write-Host "Downloading bundled Ghostscript $ghostscriptVersion for Windows..."
+        Invoke-WebRequest -Uri $ghostscriptDownloadUrl -OutFile $installerPath
+    }
+
+    $ghostscript = Get-ChildItem -Path $installRoot -Filter gswin64c.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+
+    if (-not $ghostscript) {
+        Remove-Item $installRoot -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
+
+        Write-Host "Installing cached Ghostscript runtime..."
+        $process = Start-Process -FilePath $installerPath -ArgumentList @("/S", "/D=$installRoot") -NoNewWindow -Wait -PassThru
+        if ($process.ExitCode -ne 0) {
+            throw "Ghostscript installer failed with exit code $($process.ExitCode)."
+        }
+
+        $ghostscript = Get-ChildItem -Path $installRoot -Filter gswin64c.exe -Recurse | Select-Object -First 1
+    }
+
+    if (-not $ghostscript) {
+        throw "The cached Ghostscript installer did not produce gswin64c.exe."
+    }
+
+    $binDir = Split-Path -Parent $ghostscript.FullName
+    $engineRoot = Split-Path -Parent $binDir
+
+    return @{
+        Root = $engineRoot
+        Binary = $ghostscript.FullName
+    }
+}
+
 function Stage-AppBundle([string]$StageDir) {
     Remove-Item $StageDir -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
@@ -157,12 +207,17 @@ function Sync-SetupIconFromExe([string]$ExePath) {
     }
 }
 
-function Copy-BundledEngine([string]$StageDir, $EngineArtifacts) {
+function Copy-BundledEngine([string]$StageDir, $EngineArtifacts, $DocumentEngineArtifacts) {
     Copy-Item $EngineArtifacts.Ffmpeg (Join-Path $StageDir "ffmpeg.exe") -Force
     Copy-Item $EngineArtifacts.Ffprobe (Join-Path $StageDir "ffprobe.exe") -Force
     if ($EngineArtifacts.Ffplay) {
         Copy-Item $EngineArtifacts.Ffplay (Join-Path $StageDir "ffplay.exe") -Force
     }
+
+    $documentEngineDir = Join-Path $StageDir "document-engine"
+    Remove-Item $documentEngineDir -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $documentEngineDir | Out-Null
+    Copy-Item (Join-Path $DocumentEngineArtifacts.Root "*") $documentEngineDir -Recurse -Force
 }
 
 Push-Location $repoRoot
@@ -179,11 +234,13 @@ $requestedVariants = Get-RequestedVariants
 $iscc = Find-Iscc
 $createdOutputs = New-Object System.Collections.Generic.List[string]
 $engineArtifacts = $null
+$documentEngineArtifacts = $null
 
 New-Item -ItemType Directory -Force -Path $installerDir | Out-Null
 
 if ($requestedVariants -contains "bundled") {
     $engineArtifacts = Ensure-EngineCache
+    $documentEngineArtifacts = Ensure-DocumentEngineCache
 }
 
 foreach ($variantName in $requestedVariants) {
@@ -194,9 +251,9 @@ foreach ($variantName in $requestedVariants) {
     Stage-AppBundle $stageDir
 
     if ($variantName -eq "bundled") {
-        Copy-BundledEngine $stageDir $engineArtifacts
+        Copy-BundledEngine $stageDir $engineArtifacts $documentEngineArtifacts
     } else {
-        Write-Host "Skipping bundled FFmpeg for variant '$variantName'."
+        Write-Host "Skipping bundled FFmpeg and Ghostscript for variant '$variantName'."
     }
 
     if ($iscc) {

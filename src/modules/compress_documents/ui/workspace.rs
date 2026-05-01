@@ -150,15 +150,15 @@ impl CompressDocumentsPage {
                     theme,
                     "Engines",
                     15.0,
-                    Some("PDF uses lopdf stream/object optimization. Office, ODF, EPUB, XPS, and Visio use ZIP deflate repacking with required mimetype entries preserved."),
+                    Some("PDF requires the bundled Ghostscript engine. qpdf may polish Ghostscript output when available. ZIP-package documents repack safely and optimize embedded media."),
                 );
                 ui.add_space(8.0);
                 for label in [
-                    "PDF: stream and object compression",
-                    "DOCX/XLSX/PPTX: OOXML ZIP repack",
-                    "ODT/ODS/ODP: ODF-safe ZIP repack",
-                    "EPUB: OCF-safe ZIP repack",
-                    "XPS/Visio: package repack",
+                    "PDF: bundled Ghostscript engine",
+                    "PDF: optional qpdf structural polish",
+                    "DOCX/XLSX/PPTX: media-aware ZIP repack",
+                    "ODT/EPUB: mimetype-safe package repack",
+                    "XPS/Visio: package media optimization",
                 ] {
                     ui.label(RichText::new(label).size(12.0).color(theme.colors.fg_dim));
                 }

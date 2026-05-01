@@ -26,8 +26,18 @@ pub fn managed_engine_dir() -> Option<PathBuf> {
     data_dir().map(|dir| dir.join("engine").join(platform_dirname()))
 }
 
+/// Returns the per-platform folder for managed document compression engines.
+pub fn managed_document_engine_dir() -> Option<PathBuf> {
+    data_dir().map(|dir| dir.join("document-engine").join(platform_dirname()))
+}
+
 pub fn bundled_engine_dir() -> Option<PathBuf> {
     current_exe_dir()
+}
+
+/// Returns the folder used for document engines shipped beside the app binary.
+pub fn bundled_document_engine_dir() -> Option<PathBuf> {
+    current_exe_dir().map(|dir| dir.join("document-engine"))
 }
 
 pub fn current_exe_dir() -> Option<PathBuf> {

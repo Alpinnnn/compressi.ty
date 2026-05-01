@@ -16,7 +16,7 @@ Compressi.ty is a native desktop application built with Rust and `eframe/egui`. 
 - Native desktop UI. The application ships as a Rust desktop app with custom theming, fonts, and branding assets.
 - Real workflows available today. The repository already includes working photo, video, audio, and document compression modules.
 - Built to expand. Additional workspaces for file compression, folder compression, and archive/extract already have routed UI shells in place.
-- Distribution ready. Windows and Linux packaging scripts produce portable bundles and installer-ready outputs.
+- Distribution ready. Windows and Linux packaging scripts produce portable bundles and installer-ready outputs with bundled media/document engines.
 
 ## Project Status
 
@@ -60,10 +60,10 @@ Compressi.ty is a native desktop application built with Rust and `eframe/egui`. 
 - Supported input formats: `PDF`, `DOCX`, `DOCM`, `DOTX`, `DOTM`, `XLSX`, `XLSM`, `XLTX`, `XLTM`, `XLAM`, `PPTX`, `PPTM`, `POTX`, `POTM`, `PPSX`, `PPSM`, `PPAM`, `SLDX`, `SLDM`, `ODT`, `OTT`, `OTH`, `ODM`, `ODS`, `OTS`, `ODP`, `OTP`, `ODG`, `OTG`, `ODF`, `ODC`, `ODI`, `ODB`, `EPUB`, `XPS`, `OXPS`, `VSDX`, `VSDM`, `VSSTX`, `VSSTM`, `VSSX`, `VSSM`, `VSTX`, `VSTM`
 - Drag-and-drop and file picker queue with per-row single compression or full batch compression
 - Presets: `Maximum Compatibility`, `Balanced`, `High Compression`, `Ultra Compression`
-- PDF optimization uses Rust-native `lopdf` stream compression and optional object/xref streams
-- Office, OpenDocument, EPUB, XPS, and Visio files use ZIP deflate repacking through `zip-rs`
+- PDF optimization requires the bundled Ghostscript document engine, with optional qpdf structural polish when available
+- Office, OpenDocument, EPUB, XPS, and Visio files use ZIP deflate repacking through `zip-rs` plus embedded PNG/JPEG media optimization
 - OpenDocument and EPUB packages preserve the required uncompressed first `mimetype` entry
-- Engine discovery order: managed update, bundled runtime, then system `PATH`
+- Document engine discovery checks managed Ghostscript, bundled Ghostscript, the app folder, then system `PATH`
 
 ## Architecture
 
@@ -107,7 +107,7 @@ The repository already follows a clear split that is easy to extend:
   - Photos: `compressi.ty-output/photos/run-<timestamp>/`
   - Documents: `compressi.ty-output/documents/run-<timestamp>/`
   - Videos: `compressi.ty-output/videos/run-<timestamp>/`
-- Managed FFmpeg updates are stored in local app data so installed application folders can remain read-only
+- Managed FFmpeg and document-engine updates are stored in local app data so installed application folders can remain read-only
 
 ## Getting Started
 
@@ -140,6 +140,8 @@ The video workspace can use any of the following FFmpeg sources:
 3. System FFmpeg available on `PATH`
 
 If no engine is available, the application attempts to prepare a managed FFmpeg runtime automatically.
+
+The document workspace requires Ghostscript for PDF compression. Bundled release builds stage Ghostscript under `document-engine/`; development builds can also use a Ghostscript executable available on `PATH`.
 
 ## Packaging and Release
 

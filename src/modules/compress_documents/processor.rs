@@ -1,7 +1,7 @@
 use std::{
     ffi::OsStr,
     fs::{self, File},
-    io,
+    io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -12,7 +12,6 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use lopdf::{Document, SaveOptions};
 use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 
 use crate::{
@@ -23,6 +22,10 @@ use crate::{
     },
     runtime,
 };
+
+mod package_media;
+mod pdf;
+mod pdf_tools;
 
 /// Events emitted by the background document compression worker.
 #[derive(Debug)]
@@ -194,7 +197,7 @@ fn compress_one(
     });
 
     match asset.kind {
-        DocumentKind::Pdf => compress_pdf(asset, settings, &output_path, cancel_flag, sender)?,
+        DocumentKind::Pdf => pdf::compress_pdf(asset, settings, &output_path, cancel_flag, sender)?,
         kind if kind.is_zip_package() => {
             recompress_zip_package(asset, settings, &output_path, cancel_flag, sender)?
         }
@@ -221,63 +224,6 @@ fn compress_one(
         compressed_size,
         reduction_percent,
     })
-}
-
-fn compress_pdf(
-    asset: &DocumentAsset,
-    settings: &DocumentCompressionSettings,
-    output_path: &Path,
-    cancel_flag: &AtomicBool,
-    sender: &Sender<DocumentBatchEvent>,
-) -> Result<(), String> {
-    let _ = sender.send(DocumentBatchEvent::FileProgress {
-        id: asset.id,
-        progress: 0.28,
-        stage: "Reading PDF".to_owned(),
-    });
-
-    let mut document = Document::load(&asset.path)
-        .map_err(|error| format!("Could not read PDF {}: {error}", asset.path.display()))?;
-    if document.is_encrypted() && document.encryption_state.is_none() {
-        return Err("Encrypted PDFs need to be unlocked before compression.".to_owned());
-    }
-    if cancel_flag.load(Ordering::Relaxed) {
-        return Err("Compression cancelled.".to_owned());
-    }
-
-    let _ = sender.send(DocumentBatchEvent::FileProgress {
-        id: asset.id,
-        progress: 0.54,
-        stage: "Optimizing streams".to_owned(),
-    });
-    document.compress();
-    let _ = document.delete_zero_length_streams();
-    let _ = document.prune_objects();
-    document.renumber_objects();
-
-    if cancel_flag.load(Ordering::Relaxed) {
-        return Err("Compression cancelled.".to_owned());
-    }
-
-    let options = SaveOptions::builder()
-        .use_object_streams(settings.pdf_object_streams)
-        .use_xref_streams(settings.pdf_object_streams)
-        .max_objects_per_stream(200)
-        .compression_level(u32::from(settings.pdf_compression_level()))
-        .build();
-    let mut output = File::create(output_path)
-        .map_err(|error| format!("Could not create {}: {error}", output_path.display()))?;
-
-    let _ = sender.send(DocumentBatchEvent::FileProgress {
-        id: asset.id,
-        progress: 0.82,
-        stage: "Writing PDF".to_owned(),
-    });
-    document
-        .save_with_options(&mut output, options)
-        .map_err(|error| format!("Could not write optimized PDF: {error}"))?;
-
-    Ok(())
 }
 
 fn recompress_zip_package(
@@ -326,13 +272,29 @@ fn recompress_zip_package(
             stage: format!("Packing {}/{}", index + 1, total_entries),
         });
 
-        let large_file = entry.size() > u64::from(u32::MAX);
-        let options = zip_entry_options(settings, false, entry.unix_mode(), large_file);
+        let unix_mode = entry.unix_mode();
         if entry.is_dir() {
+            let options = zip_entry_options(settings, false, unix_mode, false);
             writer
                 .add_directory(name, options)
                 .map_err(|error| format!("Could not add directory to package: {error}"))?;
+        } else if package_media::should_optimize_entry(&name, settings) {
+            let mut payload = Vec::new();
+            entry
+                .read_to_end(&mut payload)
+                .map_err(|error| format!("Could not read package media entry: {error}"))?;
+            let payload = package_media::optimize_entry_payload(&name, payload, settings)?;
+            let large_file = payload.len() > u32::MAX as usize;
+            let options = zip_entry_options(settings, false, unix_mode, large_file);
+            writer
+                .start_file(name, options)
+                .map_err(|error| format!("Could not add file to package: {error}"))?;
+            writer
+                .write_all(&payload)
+                .map_err(|error| format!("Could not write optimized package media: {error}"))?;
         } else {
+            let large_file = entry.size() > u64::from(u32::MAX);
+            let options = zip_entry_options(settings, false, unix_mode, large_file);
             writer
                 .start_file(name, options)
                 .map_err(|error| format!("Could not add file to package: {error}"))?;

@@ -22,7 +22,7 @@ impl CompressDocumentsPage {
                     theme,
                     "Settings",
                     15.0,
-                    Some("Compression is lossless for document content. Higher levels may take longer."),
+                    Some("Image-aware presets reduce PDF and embedded media size. Higher levels may take longer."),
                 );
                 ui.add_space(10.0);
                 self.render_presets(ui, theme);
@@ -93,6 +93,30 @@ impl CompressDocumentsPage {
             .on_hover_text(
                 "Creates smaller PDFs but may be less friendly to very old PDF readers.",
             );
+            ui.add(
+                Slider::new(&mut self.settings.pdf_image_quality, 35..=100)
+                    .text("PDF image quality")
+                    .step_by(1.0),
+            )
+            .on_hover_text("Used by the bundled Ghostscript PDF engine.");
+            ui.add(
+                Slider::new(&mut self.settings.pdf_image_resolution_dpi, 72..=300)
+                    .text("PDF image DPI")
+                    .step_by(1.0),
+            )
+            .on_hover_text("Lower DPI enables stronger PDF image downsampling.");
+            ui.add(
+                Slider::new(&mut self.settings.package_image_quality, 35..=100)
+                    .text("Embedded image quality")
+                    .step_by(1.0),
+            )
+            .on_hover_text("Re-encodes JPEG media inside supported ZIP-based document packages.");
+            ui.add(
+                Slider::new(&mut self.settings.package_image_resize_percent, 40..=100)
+                    .text("Embedded image scale")
+                    .step_by(1.0),
+            )
+            .on_hover_text("Downscales large embedded PNG/JPEG media before package repacking.");
         }
     }
 
