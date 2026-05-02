@@ -233,7 +233,6 @@ fn compress_one(
     };
 
     Ok(DocumentCompressionResult {
-        output_path,
         original_size: asset.original_size,
         compressed_size,
         reduction_percent,

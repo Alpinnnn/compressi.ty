@@ -394,7 +394,6 @@ pub struct DocumentProgress {
 /// Completed output information for a compressed document.
 #[derive(Clone, Debug)]
 pub struct DocumentCompressionResult {
-    pub output_path: PathBuf,
     pub original_size: u64,
     pub compressed_size: u64,
     pub reduction_percent: f32,
