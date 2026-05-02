@@ -36,6 +36,7 @@ pub struct CompressityApp {
     external_launches: Option<ExternalLaunchReceiver>,
     /// Snapshot of settings from previous frame to detect changes and save.
     prev_settings_snapshot: Option<AppSettings>,
+    settings_view_state: ui::settings_view::SettingsViewState,
 }
 
 impl CompressityApp {
@@ -79,6 +80,7 @@ impl CompressityApp {
             pending_launch_import,
             external_launches,
             prev_settings_snapshot: Some(app_settings.clone()),
+            settings_view_state: ui::settings_view::SettingsViewState::default(),
             app_settings,
         }
     }
@@ -311,6 +313,7 @@ impl eframe::App for CompressityApp {
                             ctx,
                             &self.theme,
                             &mut self.app_settings,
+                            &mut self.settings_view_state,
                             &mut self.active_module,
                             &mut self.video_engine,
                             &mut self.document_engine,

@@ -96,7 +96,7 @@ impl CompressVideosPage {
                                 )
                                 .clicked()
                             {
-                                self.pick_videos(engine);
+                                self.pick_videos(ui.ctx());
                             }
                             if !ready {
                                 ui.add_space(4.0);

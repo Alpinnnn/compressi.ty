@@ -11,11 +11,17 @@ mod workspace;
 
 use eframe::egui::{self, Ui, vec2};
 
-use crate::modules::compress_videos::{
-    engine::VideoEngineController, models::VideoCompressionState,
+use crate::{
+    file_dialog::{self, FileDialogFilter},
+    modules::compress_videos::{engine::VideoEngineController, models::VideoCompressionState},
 };
 
 pub(super) use super::{BannerMessage, BannerTone, CompressVideosPage};
+
+const VIDEO_FILE_FILTERS: &[FileDialogFilter] = &[FileDialogFilter::new(
+    "Videos",
+    &["mp4", "mov", "mkv", "webm", "avi", "m4v"],
+)];
 
 pub(super) fn flush(ui: &mut Ui) {
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -46,12 +52,32 @@ pub(super) fn is_video_settings_editable(state: &VideoCompressionState) -> bool 
 }
 
 impl CompressVideosPage {
-    fn pick_videos(&mut self, engine: &VideoEngineController) {
-        if let Some(paths) = rfd::FileDialog::new()
-            .add_filter("Videos", &["mp4", "mov", "mkv", "webm", "avi", "m4v"])
-            .pick_files()
+    fn poll_native_dialogs(&mut self, engine: &VideoEngineController) {
+        if let Some(result) = file_dialog::poll_dialog(&mut self.file_picker_rx)
+            && let Some(paths) = result
         {
             self.add_paths(paths, engine);
+        }
+
+        if let Some(result) = file_dialog::poll_dialog(&mut self.output_folder_picker_rx)
+            && let Some(directory) = result
+        {
+            self.output_dir = Some(directory);
+            self.output_dir_user_set = true;
+        }
+    }
+
+    fn pick_videos(&mut self, ctx: &egui::Context) {
+        if self.file_picker_rx.is_none() {
+            self.file_picker_rx =
+                file_dialog::pick_files(ctx, "Select videos", VIDEO_FILE_FILTERS.to_vec());
+        }
+    }
+
+    pub(super) fn pick_output_folder(&mut self, ctx: &egui::Context) {
+        if self.output_folder_picker_rx.is_none() {
+            self.output_folder_picker_rx =
+                file_dialog::pick_folder(ctx, "Choose video output folder");
         }
     }
 

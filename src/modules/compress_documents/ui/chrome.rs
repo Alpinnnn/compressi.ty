@@ -54,10 +54,8 @@ impl CompressDocumentsPage {
                                 .corner_radius(CornerRadius::ZERO),
                             )
                             .clicked()
-                            && let Some(directory) = rfd::FileDialog::new().pick_folder()
                         {
-                            self.output_dir = Some(directory);
-                            self.output_dir_user_set = true;
+                            self.select_output_folder(ui.ctx());
                         }
 
                         if let Some(path) = &output_dir {

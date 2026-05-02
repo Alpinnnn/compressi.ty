@@ -4,6 +4,11 @@ use resvg::{
     usvg,
 };
 
+/// Desktop application id used for Wayland and Linux desktop metadata.
+pub const APP_ID: &str = "io.github.Alpinnnn.Compressity";
+/// Human-readable application name shown in window titles and dialogs.
+pub const APP_NAME: &str = "Compressi.ty";
+
 const APP_ICON_TEXTURE_NAME: &str = "compressity-app-icon";
 const APP_ICON_SVG: &str = include_str!("../assets/icon/icon.svg");
 

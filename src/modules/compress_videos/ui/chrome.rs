@@ -66,10 +66,7 @@ impl CompressVideosPage {
                             )
                             .clicked()
                         {
-                            if let Some(directory) = rfd::FileDialog::new().pick_folder() {
-                                self.output_dir = Some(directory);
-                                self.output_dir_user_set = true;
-                            }
+                            self.pick_output_folder(ui.ctx());
                         }
 
                         if let Some(directory) = &output_dir {

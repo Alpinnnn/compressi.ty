@@ -10,6 +10,7 @@ mod workspace;
 use eframe::egui::{self, Align, Layout, Rect, Ui, vec2};
 
 use crate::{
+    file_dialog::{self, FileDialogFilter},
     modules::{
         ModuleKind,
         compress_audio::models::AudioCompressionState,
@@ -26,6 +27,13 @@ const MEDIA_PANEL_GAP: f32 = 12.0;
 const DETAILS_COLLAPSED_HEIGHT: f32 = 168.0;
 const DETAILS_EXPANDED_HEIGHT: f32 = 320.0;
 const DROP_ZONE_MIN_HEIGHT: f32 = 132.0;
+const AUDIO_FILE_FILTERS: &[FileDialogFilter] = &[FileDialogFilter::new(
+    "Audio",
+    &[
+        "aac", "aif", "aiff", "flac", "m4a", "m4b", "mka", "mp2", "mp3", "oga", "ogg", "opus",
+        "wav", "wma",
+    ],
+)];
 
 pub(super) fn flush(ui: &mut Ui) {
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -75,18 +83,32 @@ impl CompressAudioPage {
         (drop_height, details_height)
     }
 
-    fn pick_audio_files(&mut self, engine: &mut VideoEngineController) {
-        if let Some(paths) = rfd::FileDialog::new()
-            .add_filter(
-                "Audio",
-                &[
-                    "aac", "aif", "aiff", "flac", "m4a", "m4b", "mka", "mp2", "mp3", "oga", "ogg",
-                    "opus", "wav", "wma",
-                ],
-            )
-            .pick_files()
+    fn poll_native_dialogs(&mut self, engine: &mut VideoEngineController) {
+        if let Some(result) = file_dialog::poll_dialog(&mut self.file_picker_rx)
+            && let Some(paths) = result
         {
             self.add_paths(paths, engine);
+        }
+
+        if let Some(result) = file_dialog::poll_dialog(&mut self.output_folder_picker_rx)
+            && let Some(directory) = result
+        {
+            self.output_dir = Some(directory);
+            self.output_dir_user_set = true;
+        }
+    }
+
+    fn pick_audio_files(&mut self, ctx: &egui::Context) {
+        if self.file_picker_rx.is_none() {
+            self.file_picker_rx =
+                file_dialog::pick_files(ctx, "Select audio files", AUDIO_FILE_FILTERS.to_vec());
+        }
+    }
+
+    pub(super) fn pick_output_folder(&mut self, ctx: &egui::Context) {
+        if self.output_folder_picker_rx.is_none() {
+            self.output_folder_picker_rx =
+                file_dialog::pick_folder(ctx, "Choose audio output folder");
         }
     }
 
@@ -119,6 +141,7 @@ impl CompressAudioPage {
         if !self.output_dir_user_set {
             self.output_dir = app_settings.preferred_audio_output_folder();
         }
+        self.poll_native_dialogs(engine);
         self.handle_dropped_files(ctx, engine);
         self.flush_deferred_paths(engine);
         flush(ui);

@@ -7,6 +7,7 @@ mod workspace;
 use eframe::egui::{self, Align, Layout, Rect, Ui, vec2};
 
 use crate::{
+    file_dialog::{self, FileDialogFilter},
     modules::{ModuleKind, compress_documents::engine::DocumentEngineController},
     settings::AppSettings,
     theme::AppTheme,
@@ -70,12 +71,38 @@ impl CompressDocumentsPage {
         }
     }
 
-    pub(super) fn select_documents(&mut self) {
-        if let Some(paths) = rfd::FileDialog::new()
-            .add_filter("Documents", super::processor::supported_extensions())
-            .pick_files()
+    fn poll_native_dialogs(&mut self) {
+        if let Some(result) = file_dialog::poll_dialog(&mut self.file_picker_rx)
+            && let Some(paths) = result
         {
             self.add_paths(paths);
+        }
+
+        if let Some(result) = file_dialog::poll_dialog(&mut self.output_folder_picker_rx)
+            && let Some(directory) = result
+        {
+            self.output_dir = Some(directory);
+            self.output_dir_user_set = true;
+        }
+    }
+
+    pub(super) fn select_documents(&mut self, ctx: &egui::Context) {
+        if self.file_picker_rx.is_none() {
+            self.file_picker_rx = file_dialog::pick_files(
+                ctx,
+                "Select documents",
+                vec![FileDialogFilter::new(
+                    "Documents",
+                    super::processor::supported_extensions(),
+                )],
+            );
+        }
+    }
+
+    pub(super) fn select_output_folder(&mut self, ctx: &egui::Context) {
+        if self.output_folder_picker_rx.is_none() {
+            self.output_folder_picker_rx =
+                file_dialog::pick_folder(ctx, "Choose document output folder");
         }
     }
 
@@ -92,6 +119,7 @@ impl CompressDocumentsPage {
         if !self.output_dir_user_set {
             self.output_dir = app_settings.preferred_document_output_folder();
         }
+        self.poll_native_dialogs();
         flush(ui);
 
         let panel_rect = ui.max_rect();

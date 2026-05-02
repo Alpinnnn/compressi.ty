@@ -43,6 +43,8 @@ pub struct CompressVideosPage {
     preview_texture: Option<TextureHandle>,
     preview_texture_dirty: bool,
     running_preview_stream: Option<RunningPreviewStream>,
+    file_picker_rx: Option<crate::file_dialog::DialogReceiver<Vec<PathBuf>>>,
+    output_folder_picker_rx: Option<crate::file_dialog::DialogReceiver<PathBuf>>,
 }
 
 struct PendingProbe {

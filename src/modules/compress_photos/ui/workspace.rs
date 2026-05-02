@@ -153,7 +153,7 @@ impl CompressPhotosPage {
                                         )
                                         .clicked()
                                     {
-                                        self.select_images();
+                                        self.select_images(ui.ctx());
                                     }
 
                                     if ui
@@ -172,10 +172,7 @@ impl CompressPhotosPage {
                                         )
                                         .clicked()
                                     {
-                                        if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                                            self.output_dir = Some(dir);
-                                            self.output_dir_user_set = true;
-                                        }
+                                        self.select_output_folder(ui.ctx());
                                     }
                                 });
 
@@ -208,7 +205,7 @@ impl CompressPhotosPage {
                                 )
                                 .clicked()
                             {
-                                self.select_images();
+                                self.select_images(ui.ctx());
                             }
                         });
                     });

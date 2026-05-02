@@ -137,7 +137,7 @@ impl CompressDocumentsPage {
                     )
                     .clicked()
                 {
-                    self.select_documents();
+                    self.select_documents(ui.ctx());
                 }
             });
         });

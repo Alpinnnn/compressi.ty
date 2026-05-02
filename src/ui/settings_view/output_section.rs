@@ -3,13 +3,70 @@ use std::path::PathBuf;
 use eframe::egui::{self, Button, Color32, CornerRadius, RichText, Stroke, Ui};
 
 use crate::{
+    file_dialog::{self, DialogReceiver},
     icons, runtime,
     settings::AppSettings,
     theme::AppTheme,
     ui::components::{hint, panel},
 };
 
-pub(super) fn render_output_settings(ui: &mut Ui, theme: &AppTheme, settings: &mut AppSettings) {
+#[derive(Default)]
+pub(super) struct OutputSettingsState {
+    folder_picker_rx: Option<DialogReceiver<PathBuf>>,
+    pending_target: Option<OutputFolderTarget>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OutputFolderTarget {
+    Default,
+    Photo,
+    Audio,
+    Video,
+    Document,
+}
+
+struct OutputFolderField<'a> {
+    title: &'static str,
+    detail: &'static str,
+    setting: &'a mut Option<PathBuf>,
+    fallback_text: &'a str,
+    reset_label: &'static str,
+    target: OutputFolderTarget,
+    dialog_title: &'static str,
+}
+
+impl OutputSettingsState {
+    fn poll_folder_picker(&mut self, settings: &mut AppSettings) {
+        let Some(result) = file_dialog::poll_dialog(&mut self.folder_picker_rx) else {
+            return;
+        };
+        let target = self.pending_target.take();
+
+        if let (Some(target), Some(directory)) = (target, result) {
+            output_folder_setting_mut(settings, target).replace(directory);
+        }
+    }
+
+    fn choose_folder(&mut self, ui: &Ui, title: &'static str, target: OutputFolderTarget) {
+        if self.folder_picker_rx.is_some() {
+            return;
+        }
+
+        self.folder_picker_rx = file_dialog::pick_folder(ui.ctx(), title);
+        if self.folder_picker_rx.is_some() {
+            self.pending_target = Some(target);
+        }
+    }
+}
+
+pub(super) fn render_output_settings(
+    ui: &mut Ui,
+    theme: &AppTheme,
+    settings: &mut AppSettings,
+    state: &mut OutputSettingsState,
+) {
+    state.poll_folder_picker(settings);
+
     panel::card(theme)
         .inner_margin(egui::Margin::same(20))
         .show(ui, |ui| {
@@ -28,11 +85,16 @@ pub(super) fn render_output_settings(ui: &mut Ui, theme: &AppTheme, settings: &m
             render_output_folder_field(
                 ui,
                 theme,
-                "Default Output Folder",
-                "Sets the default destination for all compression modules. You can still override this per session.",
-                &mut settings.default_output_folder,
-                &general_auto,
-                "Reset to Auto",
+                OutputFolderField {
+                    title: "Default Output Folder",
+                    detail: "Sets the default destination for all compression modules. You can still override this per session.",
+                    setting: &mut settings.default_output_folder,
+                    fallback_text: &general_auto,
+                    reset_label: "Reset to Auto",
+                    target: OutputFolderTarget::Default,
+                    dialog_title: "Choose default output folder",
+                },
+                state,
             );
 
             ui.add_space(14.0);
@@ -58,11 +120,16 @@ pub(super) fn render_output_settings(ui: &mut Ui, theme: &AppTheme, settings: &m
                     render_output_folder_field(
                         ui,
                         theme,
-                        "Photo Output Folder",
-                        "Overrides the default output location for Compress Photos. Leave empty to follow Default Output Folder.",
-                        &mut settings.photo_output_folder,
-                        &photo_fallback,
-                        "Use Default Output Folder",
+                        OutputFolderField {
+                            title: "Photo Output Folder",
+                            detail: "Overrides the default output location for Compress Photos. Leave empty to follow Default Output Folder.",
+                            setting: &mut settings.photo_output_folder,
+                            fallback_text: &photo_fallback,
+                            reset_label: "Use Default Output Folder",
+                            target: OutputFolderTarget::Photo,
+                            dialog_title: "Choose photo output folder",
+                        },
+                        state,
                     );
 
                     ui.add_space(14.0);
@@ -82,11 +149,16 @@ pub(super) fn render_output_settings(ui: &mut Ui, theme: &AppTheme, settings: &m
                     render_output_folder_field(
                         ui,
                         theme,
-                        "Audio Output Folder",
-                        "Overrides the default output location for Compress Audio. Leave empty to follow Default Output Folder.",
-                        &mut settings.audio_output_folder,
-                        &audio_fallback,
-                        "Use Default Output Folder",
+                        OutputFolderField {
+                            title: "Audio Output Folder",
+                            detail: "Overrides the default output location for Compress Audio. Leave empty to follow Default Output Folder.",
+                            setting: &mut settings.audio_output_folder,
+                            fallback_text: &audio_fallback,
+                            reset_label: "Use Default Output Folder",
+                            target: OutputFolderTarget::Audio,
+                            dialog_title: "Choose audio output folder",
+                        },
+                        state,
                     );
 
                     ui.add_space(14.0);
@@ -106,11 +178,16 @@ pub(super) fn render_output_settings(ui: &mut Ui, theme: &AppTheme, settings: &m
                     render_output_folder_field(
                         ui,
                         theme,
-                        "Video Output Folder",
-                        "Overrides the default output location for Compress Videos. Files are saved directly into this folder.",
-                        &mut settings.video_output_folder,
-                        &video_fallback,
-                        "Use Default Output Folder",
+                        OutputFolderField {
+                            title: "Video Output Folder",
+                            detail: "Overrides the default output location for Compress Videos. Files are saved directly into this folder.",
+                            setting: &mut settings.video_output_folder,
+                            fallback_text: &video_fallback,
+                            reset_label: "Use Default Output Folder",
+                            target: OutputFolderTarget::Video,
+                            dialog_title: "Choose video output folder",
+                        },
+                        state,
                     );
 
                     ui.add_space(14.0);
@@ -130,11 +207,16 @@ pub(super) fn render_output_settings(ui: &mut Ui, theme: &AppTheme, settings: &m
                     render_output_folder_field(
                         ui,
                         theme,
-                        "Document Output Folder",
-                        "Overrides the default output location for Compress Documents. Leave empty to follow Default Output Folder.",
-                        &mut settings.document_output_folder,
-                        &document_fallback,
-                        "Use Default Output Folder",
+                        OutputFolderField {
+                            title: "Document Output Folder",
+                            detail: "Overrides the default output location for Compress Documents. Leave empty to follow Default Output Folder.",
+                            setting: &mut settings.document_output_folder,
+                            fallback_text: &document_fallback,
+                            reset_label: "Use Default Output Folder",
+                            target: OutputFolderTarget::Document,
+                            dialog_title: "Choose document output folder",
+                        },
+                        state,
                     );
                 });
         });
@@ -143,12 +225,19 @@ pub(super) fn render_output_settings(ui: &mut Ui, theme: &AppTheme, settings: &m
 fn render_output_folder_field(
     ui: &mut Ui,
     theme: &AppTheme,
-    title: &str,
-    detail: &str,
-    setting: &mut Option<PathBuf>,
-    fallback_text: &str,
-    reset_label: &str,
+    field: OutputFolderField<'_>,
+    state: &mut OutputSettingsState,
 ) {
+    let OutputFolderField {
+        title,
+        detail,
+        setting,
+        fallback_text,
+        reset_label,
+        target,
+        dialog_title,
+    } = field;
+
     hint::title(ui, theme, title, 13.0, Some(detail));
     ui.add_space(8.0);
 
@@ -186,9 +275,8 @@ fn render_output_folder_field(
                 .corner_radius(CornerRadius::ZERO),
             )
             .clicked()
-            && let Some(dir) = rfd::FileDialog::new().pick_folder()
         {
-            *setting = Some(dir);
+            state.choose_folder(ui, dialog_title, target);
         }
 
         if setting.is_some()
@@ -204,4 +292,17 @@ fn render_output_folder_field(
             *setting = None;
         }
     });
+}
+
+fn output_folder_setting_mut(
+    settings: &mut AppSettings,
+    target: OutputFolderTarget,
+) -> &mut Option<PathBuf> {
+    match target {
+        OutputFolderTarget::Default => &mut settings.default_output_folder,
+        OutputFolderTarget::Photo => &mut settings.photo_output_folder,
+        OutputFolderTarget::Audio => &mut settings.audio_output_folder,
+        OutputFolderTarget::Video => &mut settings.video_output_folder,
+        OutputFolderTarget::Document => &mut settings.document_output_folder,
+    }
 }

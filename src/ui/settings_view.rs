@@ -20,15 +20,23 @@ use crate::{
 
 use self::{
     document_engine_section::render_document_engine_settings,
-    engine_section::render_engine_settings, output_section::render_output_settings,
+    engine_section::render_engine_settings,
+    output_section::{OutputSettingsState, render_output_settings},
     processing_section::render_processing_settings,
 };
+
+/// Runtime state for non-blocking controls in the settings workspace.
+#[derive(Default)]
+pub struct SettingsViewState {
+    output_settings: OutputSettingsState,
+}
 
 pub fn show(
     ui: &mut Ui,
     ctx: &egui::Context,
     theme: &AppTheme,
     app_settings: &mut AppSettings,
+    state: &mut SettingsViewState,
     active_module: &mut Option<ModuleKind>,
     video_engine: &mut VideoEngineController,
     document_engine: &mut DocumentEngineController,
@@ -60,7 +68,7 @@ pub fn show(
                     vec2(max_width.min(available_width), 0.0),
                     Layout::top_down(Align::Min),
                     |ui| {
-                        render_output_settings(ui, theme, app_settings);
+                        render_output_settings(ui, theme, app_settings, &mut state.output_settings);
                         ui.add_space(16.0);
                         render_processing_settings(ui, theme, app_settings);
                         ui.add_space(16.0);

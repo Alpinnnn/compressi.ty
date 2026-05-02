@@ -30,6 +30,8 @@ pub struct CompressDocumentsPage {
     file_loader_rx: Option<mpsc::Receiver<FileLoadResult>>,
     pending_add_count: usize,
     document_icon_textures: HashMap<&'static str, TextureHandle>,
+    file_picker_rx: Option<crate::file_dialog::DialogReceiver<Vec<PathBuf>>>,
+    output_folder_picker_rx: Option<crate::file_dialog::DialogReceiver<PathBuf>>,
 }
 
 struct FileLoadResult {

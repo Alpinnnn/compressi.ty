@@ -26,6 +26,7 @@ impl CompressVideosPage {
         if !self.output_dir_user_set {
             self.output_dir = app_settings.preferred_video_output_folder();
         }
+        self.poll_native_dialogs(engine);
         self.handle_dropped_files(ctx, engine);
         flush(ui);
 

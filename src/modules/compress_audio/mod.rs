@@ -42,6 +42,8 @@ pub struct CompressAudioPage {
     preview_player: AudioPreviewPlayer,
     preview_scrub_position: Option<(u64, f32)>,
     track_info_open: bool,
+    file_picker_rx: Option<crate::file_dialog::DialogReceiver<Vec<PathBuf>>>,
+    output_folder_picker_rx: Option<crate::file_dialog::DialogReceiver<PathBuf>>,
 }
 
 struct PendingProbe {
@@ -84,6 +86,8 @@ impl Default for CompressAudioPage {
             preview_player: AudioPreviewPlayer::default(),
             preview_scrub_position: None,
             track_info_open: false,
+            file_picker_rx: None,
+            output_folder_picker_rx: None,
         }
     }
 }

@@ -8,9 +8,19 @@ mod workspace;
 
 use eframe::egui::{self, Align, Layout, Rect, Ui, vec2};
 
-use crate::{modules::ModuleKind, settings::AppSettings, theme::AppTheme};
+use crate::{
+    file_dialog::{self, FileDialogFilter},
+    modules::ModuleKind,
+    settings::AppSettings,
+    theme::AppTheme,
+};
 
 pub(super) use super::{BannerMessage, BannerTone, CompressPhotosPage, PhotoListItem};
+
+const IMAGE_FILE_FILTERS: &[FileDialogFilter] = &[FileDialogFilter::new(
+    "Images",
+    &["png", "jpg", "jpeg", "webp", "avif"],
+)];
 
 pub(super) fn flush(ui: &mut Ui) {
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -49,12 +59,32 @@ impl CompressPhotosPage {
         }
     }
 
-    pub(super) fn select_images(&mut self) {
-        if let Some(paths) = rfd::FileDialog::new()
-            .add_filter("Images", &["png", "jpg", "jpeg", "webp", "avif"])
-            .pick_files()
+    pub(super) fn poll_native_dialogs(&mut self) {
+        if let Some(result) = file_dialog::poll_dialog(&mut self.file_picker_rx)
+            && let Some(paths) = result
         {
             self.add_paths(paths);
+        }
+
+        if let Some(result) = file_dialog::poll_dialog(&mut self.output_folder_picker_rx)
+            && let Some(dir) = result
+        {
+            self.output_dir = Some(dir);
+            self.output_dir_user_set = true;
+        }
+    }
+
+    pub(super) fn select_images(&mut self, ctx: &egui::Context) {
+        if self.file_picker_rx.is_none() {
+            self.file_picker_rx =
+                file_dialog::pick_files(ctx, "Select images", IMAGE_FILE_FILTERS.to_vec());
+        }
+    }
+
+    pub(super) fn select_output_folder(&mut self, ctx: &egui::Context) {
+        if self.output_folder_picker_rx.is_none() {
+            self.output_folder_picker_rx =
+                file_dialog::pick_folder(ctx, "Choose photo output folder");
         }
     }
 
@@ -70,6 +100,7 @@ impl CompressPhotosPage {
         if !self.output_dir_user_set {
             self.output_dir = app_settings.preferred_photo_output_folder();
         }
+        self.poll_native_dialogs();
         self.handle_dropped_files(ctx);
         self.apply_pending_loaded_photos(ctx);
         self.poll_preview_loader(ctx);

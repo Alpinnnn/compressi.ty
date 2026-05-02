@@ -38,6 +38,8 @@ pub struct CompressPhotosPage {
     file_loader_rx: Option<mpsc::Receiver<FileLoadResult>>,
     pending_add_count: usize,
     pending_loaded_photos: Vec<LoadedPhoto>,
+    file_picker_rx: Option<crate::file_dialog::DialogReceiver<Vec<PathBuf>>>,
+    output_folder_picker_rx: Option<crate::file_dialog::DialogReceiver<PathBuf>>,
 }
 
 struct FileLoadResult {
@@ -105,6 +107,8 @@ impl Default for CompressPhotosPage {
             file_loader_rx: None,
             pending_add_count: 0,
             pending_loaded_photos: Vec::new(),
+            file_picker_rx: None,
+            output_folder_picker_rx: None,
         }
     }
 }

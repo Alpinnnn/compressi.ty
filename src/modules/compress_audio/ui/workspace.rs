@@ -96,7 +96,7 @@ impl CompressAudioPage {
                                 )
                                 .clicked()
                             {
-                                self.pick_audio_files(engine);
+                                self.pick_audio_files(ui.ctx());
                             }
                             if !ready {
                                 ui.add_space(4.0);

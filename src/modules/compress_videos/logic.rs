@@ -33,6 +33,8 @@ impl Default for CompressVideosPage {
             preview_texture: None,
             preview_texture_dirty: false,
             running_preview_stream: None,
+            file_picker_rx: None,
+            output_folder_picker_rx: None,
         }
     }
 }

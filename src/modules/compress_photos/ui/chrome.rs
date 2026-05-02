@@ -56,10 +56,7 @@ impl CompressPhotosPage {
                             )
                             .clicked()
                         {
-                            if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                                self.output_dir = Some(dir);
-                                self.output_dir_user_set = true;
-                            }
+                            self.select_output_folder(ui.ctx());
                         }
 
                         if let Some(dir) = &output_dir {
