@@ -62,20 +62,20 @@ impl DocumentKind {
         }
     }
 
-    /// User-facing description for the compression engine used by this family.
-    pub fn engine_label(self) -> &'static str {
-        match self {
-            Self::Pdf => "PDF stream optimizer",
-            Self::MicrosoftOpenXml => "Office ZIP package",
-            Self::OpenDocument => "OpenDocument ZIP package",
-            Self::OpenPackaging => "Open Packaging package",
-            Self::Epub => "EPUB ZIP package",
-        }
-    }
-
     /// Returns true when the document family is a ZIP-based package.
     pub fn is_zip_package(self) -> bool {
         !matches!(self, Self::Pdf)
+    }
+
+    /// Label for the settings scope represented by this document family.
+    pub fn settings_label(self) -> &'static str {
+        match self {
+            Self::Pdf => "PDF settings",
+            Self::MicrosoftOpenXml => "Office settings",
+            Self::OpenDocument => "OpenDocument settings",
+            Self::OpenPackaging => "Open Packaging settings",
+            Self::Epub => "EPUB settings",
+        }
     }
 }
 
@@ -179,35 +179,110 @@ pub struct DocumentPresetDefaults {
 /// Editable settings for the current document batch.
 #[derive(Clone, Debug)]
 pub struct DocumentCompressionSettings {
+    pub pdf: PdfDocumentCompressionSettings,
+    pub microsoft_open_xml: PackageDocumentCompressionSettings,
+    pub open_document: PackageDocumentCompressionSettings,
+    pub open_packaging: PackageDocumentCompressionSettings,
+    pub epub: PackageDocumentCompressionSettings,
+}
+
+impl Default for DocumentCompressionSettings {
+    fn default() -> Self {
+        Self {
+            pdf: PdfDocumentCompressionSettings::default(),
+            microsoft_open_xml: PackageDocumentCompressionSettings::default(),
+            open_document: PackageDocumentCompressionSettings::default(),
+            open_packaging: PackageDocumentCompressionSettings::default(),
+            epub: PackageDocumentCompressionSettings::default(),
+        }
+    }
+}
+
+impl DocumentCompressionSettings {
+    /// Returns the active preset for a document family.
+    pub fn preset(&self, kind: DocumentKind) -> DocumentCompressionPreset {
+        match kind {
+            DocumentKind::Pdf => self.pdf.preset,
+            DocumentKind::MicrosoftOpenXml => self.microsoft_open_xml.preset,
+            DocumentKind::OpenDocument => self.open_document.preset,
+            DocumentKind::OpenPackaging => self.open_packaging.preset,
+            DocumentKind::Epub => self.epub.preset,
+        }
+    }
+
+    /// Replaces the settings for one document family with preset defaults.
+    pub fn apply_preset(&mut self, kind: DocumentKind, preset: DocumentCompressionPreset) {
+        match kind {
+            DocumentKind::Pdf => self.pdf.apply_preset(preset),
+            DocumentKind::MicrosoftOpenXml => self.microsoft_open_xml.apply_preset(preset),
+            DocumentKind::OpenDocument => self.open_document.apply_preset(preset),
+            DocumentKind::OpenPackaging => self.open_packaging.apply_preset(preset),
+            DocumentKind::Epub => self.epub.apply_preset(preset),
+        }
+    }
+
+    /// Returns the PDF-specific settings.
+    pub fn pdf_settings(&self) -> &PdfDocumentCompressionSettings {
+        &self.pdf
+    }
+
+    /// Returns package settings for ZIP-based document families.
+    pub fn package_settings(
+        &self,
+        kind: DocumentKind,
+    ) -> Option<&PackageDocumentCompressionSettings> {
+        match kind {
+            DocumentKind::Pdf => None,
+            DocumentKind::MicrosoftOpenXml => Some(&self.microsoft_open_xml),
+            DocumentKind::OpenDocument => Some(&self.open_document),
+            DocumentKind::OpenPackaging => Some(&self.open_packaging),
+            DocumentKind::Epub => Some(&self.epub),
+        }
+    }
+
+    /// Returns mutable package settings for ZIP-based document families.
+    pub fn package_settings_mut(
+        &mut self,
+        kind: DocumentKind,
+    ) -> Option<&mut PackageDocumentCompressionSettings> {
+        match kind {
+            DocumentKind::Pdf => None,
+            DocumentKind::MicrosoftOpenXml => Some(&mut self.microsoft_open_xml),
+            DocumentKind::OpenDocument => Some(&mut self.open_document),
+            DocumentKind::OpenPackaging => Some(&mut self.open_packaging),
+            DocumentKind::Epub => Some(&mut self.epub),
+        }
+    }
+}
+
+/// Editable settings used only by the PDF engine.
+#[derive(Clone, Debug)]
+pub struct PdfDocumentCompressionSettings {
     pub preset: DocumentCompressionPreset,
     pub advanced_mode: bool,
     pub compression_level: u8,
     pub pdf_object_streams: bool,
     pub pdf_image_quality: u8,
     pub pdf_image_resolution_dpi: u16,
-    pub package_image_quality: u8,
-    pub package_image_resize_percent: u8,
 }
 
-impl Default for DocumentCompressionSettings {
+impl Default for PdfDocumentCompressionSettings {
     fn default() -> Self {
-        let preset = DocumentCompressionPreset::Balanced;
-        let defaults = preset.defaults();
-        Self {
-            preset,
+        let mut settings = Self {
+            preset: DocumentCompressionPreset::Balanced,
             advanced_mode: false,
-            compression_level: defaults.compression_level,
-            pdf_object_streams: defaults.pdf_object_streams,
-            pdf_image_quality: defaults.pdf_image_quality,
-            pdf_image_resolution_dpi: defaults.pdf_image_resolution_dpi,
-            package_image_quality: defaults.package_image_quality,
-            package_image_resize_percent: defaults.package_image_resize_percent,
-        }
+            compression_level: 0,
+            pdf_object_streams: false,
+            pdf_image_quality: 100,
+            pdf_image_resolution_dpi: 300,
+        };
+        settings.apply_preset(DocumentCompressionPreset::Balanced);
+        settings
     }
 }
 
-impl DocumentCompressionSettings {
-    /// Replaces the active settings with the defaults for the selected preset.
+impl PdfDocumentCompressionSettings {
+    /// Replaces PDF settings with defaults for the selected preset.
     pub fn apply_preset(&mut self, preset: DocumentCompressionPreset) {
         let defaults = preset.defaults();
         self.preset = preset;
@@ -215,18 +290,11 @@ impl DocumentCompressionSettings {
         self.pdf_object_streams = defaults.pdf_object_streams;
         self.pdf_image_quality = defaults.pdf_image_quality;
         self.pdf_image_resolution_dpi = defaults.pdf_image_resolution_dpi;
-        self.package_image_quality = defaults.package_image_quality;
-        self.package_image_resize_percent = defaults.package_image_resize_percent;
     }
 
     /// Returns a PDF-compatible zlib compression level.
     pub fn pdf_compression_level(&self) -> u8 {
         self.compression_level.clamp(0, 9)
-    }
-
-    /// Returns a ZIP-compatible deflate compression level.
-    pub fn zip_compression_level(&self) -> i64 {
-        i64::from(self.compression_level.clamp(0, 9))
     }
 
     /// Returns a bounded PDF image quality for external PDF engines.
@@ -242,6 +310,46 @@ impl DocumentCompressionSettings {
     /// Returns true when PDF compression may use lossy image optimization.
     pub fn pdf_image_optimization_enabled(&self) -> bool {
         self.pdf_image_quality() < 100 || self.pdf_image_resolution_dpi() < 300
+    }
+}
+
+/// Editable settings used by ZIP-packaged document families.
+#[derive(Clone, Debug)]
+pub struct PackageDocumentCompressionSettings {
+    pub preset: DocumentCompressionPreset,
+    pub advanced_mode: bool,
+    pub compression_level: u8,
+    pub package_image_quality: u8,
+    pub package_image_resize_percent: u8,
+}
+
+impl Default for PackageDocumentCompressionSettings {
+    fn default() -> Self {
+        let mut settings = Self {
+            preset: DocumentCompressionPreset::Balanced,
+            advanced_mode: false,
+            compression_level: 0,
+            package_image_quality: 100,
+            package_image_resize_percent: 100,
+        };
+        settings.apply_preset(DocumentCompressionPreset::Balanced);
+        settings
+    }
+}
+
+impl PackageDocumentCompressionSettings {
+    /// Replaces package settings with defaults for the selected preset.
+    pub fn apply_preset(&mut self, preset: DocumentCompressionPreset) {
+        let defaults = preset.defaults();
+        self.preset = preset;
+        self.compression_level = defaults.compression_level;
+        self.package_image_quality = defaults.package_image_quality;
+        self.package_image_resize_percent = defaults.package_image_resize_percent;
+    }
+
+    /// Returns a ZIP-compatible deflate compression level.
+    pub fn zip_compression_level(&self) -> i64 {
+        i64::from(self.compression_level.clamp(0, 9))
     }
 
     /// Returns a bounded JPEG quality for media embedded in ZIP packages.
@@ -348,17 +456,37 @@ mod tests {
     #[test]
     fn preset_updates_compression_controls() {
         let mut settings = DocumentCompressionSettings::default();
-        settings.apply_preset(DocumentCompressionPreset::UltraCompression);
+        settings.apply_preset(
+            DocumentKind::Pdf,
+            DocumentCompressionPreset::UltraCompression,
+        );
+        settings.apply_preset(
+            DocumentKind::MicrosoftOpenXml,
+            DocumentCompressionPreset::HighCompression,
+        );
 
-        assert_eq!(settings.compression_level, 9);
-        assert!(settings.pdf_object_streams);
-        assert_eq!(settings.pdf_compression_level(), 9);
-        assert_eq!(settings.zip_compression_level(), 9);
-        assert_eq!(settings.pdf_image_quality(), 52);
-        assert_eq!(settings.pdf_image_resolution_dpi(), 96);
-        assert!(settings.pdf_image_optimization_enabled());
-        assert_eq!(settings.package_image_quality(), 52);
-        assert_eq!(settings.package_image_resize_percent(), 72);
-        assert!(settings.package_image_optimization_enabled());
+        assert_eq!(settings.pdf.compression_level, 9);
+        assert!(settings.pdf.pdf_object_streams);
+        assert_eq!(settings.pdf.pdf_compression_level(), 9);
+        assert_eq!(settings.pdf.pdf_image_quality(), 52);
+        assert_eq!(settings.pdf.pdf_image_resolution_dpi(), 96);
+        assert!(settings.pdf.pdf_image_optimization_enabled());
+
+        let office_settings = settings
+            .package_settings(DocumentKind::MicrosoftOpenXml)
+            .unwrap();
+        assert_eq!(office_settings.zip_compression_level(), 8);
+        assert_eq!(office_settings.package_image_quality(), 68);
+        assert_eq!(office_settings.package_image_resize_percent(), 88);
+        assert!(office_settings.package_image_optimization_enabled());
+
+        let odf_settings = settings
+            .package_settings(DocumentKind::OpenDocument)
+            .unwrap();
+        assert_eq!(odf_settings.preset, DocumentCompressionPreset::Balanced);
+        assert_eq!(
+            settings.preset(DocumentKind::Pdf),
+            DocumentCompressionPreset::UltraCompression
+        );
     }
 }

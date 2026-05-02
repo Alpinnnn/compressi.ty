@@ -15,7 +15,7 @@ use super::{
         discover_ghostscript_binary, discover_qpdf_binary, run_ghostscript_tool, run_tool,
     },
 };
-use crate::modules::compress_documents::models::{DocumentAsset, DocumentCompressionSettings};
+use crate::modules::compress_documents::models::{DocumentAsset, PdfDocumentCompressionSettings};
 
 struct PdfCandidate {
     path: PathBuf,
@@ -24,13 +24,13 @@ struct PdfCandidate {
 
 pub(super) fn compress_pdf(
     asset: &DocumentAsset,
-    settings: &DocumentCompressionSettings,
+    settings: &PdfDocumentCompressionSettings,
     output_path: &Path,
     cancel_flag: &AtomicBool,
     sender: &Sender<DocumentBatchEvent>,
 ) -> Result<(), String> {
     let ghostscript_binary = discover_ghostscript_binary().ok_or_else(|| {
-        "Ghostscript engine is required for PDF compression. Bundle it in document-engine/bin or install Ghostscript on PATH.".to_owned()
+        "Ghostscript engine is required for PDF compression. Bundle it under engine/pdf-engine or install Ghostscript on PATH.".to_owned()
     })?;
     let mut candidates = Vec::new();
     let mut errors = Vec::new();
@@ -80,7 +80,7 @@ pub(super) fn compress_pdf(
 fn build_ghostscript_candidate(
     ghostscript_binary: &Path,
     asset: &DocumentAsset,
-    settings: &DocumentCompressionSettings,
+    settings: &PdfDocumentCompressionSettings,
     output_path: &Path,
     path_label: &str,
     result_label: &'static str,
@@ -114,7 +114,7 @@ fn build_ghostscript_candidate(
 
 fn push_optional_qpdf_candidate(
     asset: &DocumentAsset,
-    settings: &DocumentCompressionSettings,
+    settings: &PdfDocumentCompressionSettings,
     original_label: &'static str,
     original_path: PathBuf,
     sender: &Sender<DocumentBatchEvent>,
@@ -159,7 +159,7 @@ fn push_optional_qpdf_candidate(
 fn run_ghostscript_pdf(
     binary: &Path,
     asset: &DocumentAsset,
-    settings: &DocumentCompressionSettings,
+    settings: &PdfDocumentCompressionSettings,
     output_path: &Path,
     sender: &Sender<DocumentBatchEvent>,
 ) -> Result<(), String> {
@@ -199,7 +199,7 @@ fn run_ghostscript_pdf(
     run_ghostscript_tool(binary, &args, "Ghostscript PDF compression")
 }
 
-fn append_lossy_image_args(args: &mut Vec<OsString>, settings: &DocumentCompressionSettings) {
+fn append_lossy_image_args(args: &mut Vec<OsString>, settings: &PdfDocumentCompressionSettings) {
     let resolution = settings.pdf_image_resolution_dpi();
     let quality = settings.pdf_image_quality();
     let profile = if resolution <= 100 {
@@ -249,7 +249,7 @@ fn append_compatibility_image_args(args: &mut Vec<OsString>) {
 fn run_qpdf_pdf(
     binary: &Path,
     input_path: &Path,
-    settings: &DocumentCompressionSettings,
+    settings: &PdfDocumentCompressionSettings,
     output_path: &Path,
     sender: &Sender<DocumentBatchEvent>,
     id: u64,

@@ -60,10 +60,11 @@ Compressi.ty is a native desktop application built with Rust and `eframe/egui`. 
 - Supported input formats: `PDF`, `DOCX`, `DOCM`, `DOTX`, `DOTM`, `XLSX`, `XLSM`, `XLTX`, `XLTM`, `XLAM`, `PPTX`, `PPTM`, `POTX`, `POTM`, `PPSX`, `PPSM`, `PPAM`, `SLDX`, `SLDM`, `ODT`, `OTT`, `OTH`, `ODM`, `ODS`, `OTS`, `ODP`, `OTP`, `ODG`, `OTG`, `ODF`, `ODC`, `ODI`, `ODB`, `EPUB`, `XPS`, `OXPS`, `VSDX`, `VSDM`, `VSSTX`, `VSSTM`, `VSSX`, `VSSM`, `VSTX`, `VSTM`
 - Drag-and-drop and file picker queue with per-row single compression or full batch compression
 - Presets: `Maximum Compatibility`, `Balanced`, `High Compression`, `Ultra Compression`
-- PDF optimization requires the bundled Ghostscript document engine, with optional qpdf structural polish when available
-- Office, OpenDocument, EPUB, XPS, and Visio files use ZIP deflate repacking through `zip-rs` plus embedded PNG/JPEG media optimization
+- PDF optimization uses the `engine/pdf-engine` toolchain: Ghostscript is required and qpdf adds structural stream polish when available
+- Office, XPS, and Visio files use embedded PNG/JPEG media optimization followed by 7-Zip Deflate repacking from `engine/package-engine`
+- OpenDocument and EPUB files use the native `zip-rs` path to preserve package layout requirements
 - OpenDocument and EPUB packages preserve the required uncompressed first `mimetype` entry
-- Document engine discovery checks managed Ghostscript, bundled Ghostscript, the app folder, then system `PATH`
+- Document engine discovery checks managed engines, bundled engines, then system `PATH`
 
 ## Architecture
 
@@ -107,17 +108,17 @@ The repository already follows a clear split that is easy to extend:
   - Photos: `compressi.ty-output/photos/run-<timestamp>/`
   - Documents: `compressi.ty-output/documents/run-<timestamp>/`
   - Videos: `compressi.ty-output/videos/run-<timestamp>/`
-- Managed FFmpeg and document-engine updates are stored in local app data so installed application folders can remain read-only
+- Managed FFmpeg and document engine updates are stored in local app data so installed application folders can remain read-only
 
 ## Getting Started
 
 ### Prerequisites
 
 - Rust toolchain
-- Internet access if you plan to use video compression from source on a machine without an existing FFmpeg runtime
+- Internet access if you plan to use managed video or document engine downloads from source
 - Optional release prerequisites:
   - Windows installer builds: Inno Setup 6
-  - Linux bundles: `bash`, `curl`, `tar`, and a C toolchain that provides `cc` (for Ubuntu/Debian/WSL: `sudo apt install build-essential`), optional `appimagetool`
+  - Linux bundles: `bash`, `curl`, `tar`, `unzip`, `squashfs-tools`, and a C toolchain that provides `cc` (for Ubuntu/Debian/WSL: `sudo apt install build-essential squashfs-tools unzip`), optional `appimagetool`
 
 ### Run From Source
 
@@ -141,7 +142,7 @@ The video workspace can use any of the following FFmpeg sources:
 
 If no engine is available, the application attempts to prepare a managed FFmpeg runtime automatically.
 
-The document workspace requires Ghostscript for PDF compression. Bundled release builds stage Ghostscript under `document-engine/`; development builds can also use a Ghostscript executable available on `PATH`.
+The document workspace prepares Ghostscript, qpdf, and 7-Zip as managed engines when bundled or system engines are missing. Release builds stage FFmpeg under `engine/video-engine`, PDF tools under `engine/pdf-engine`, and ZIP-package tools under `engine/package-engine`.
 
 ## Packaging and Release
 

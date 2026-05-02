@@ -19,7 +19,7 @@ Files:
 
 | File | Purpose |
 |---|---|
-| `build-installer.ps1` | Orchestrates the full build, supports `bundled` and `no-engine` variants, reuses cached FFmpeg and Ghostscript runtimes, and invokes Inno Setup |
+| `build-installer.ps1` | Orchestrates the full build, supports `bundled` and `no-engine` variants, reuses cached FFmpeg, Ghostscript, qpdf, and 7-Zip runtimes, and invokes Inno Setup |
 | `compressi.ty.iss` | Inno Setup script with `WizardStyle=modern dark`, per-page background switching, and `assets/icon/icon.bmp` as the small wizard badge |
 | `installer-bg-welcome.png` | Background artwork for the Welcome page |
 | `installer-bg-license.png` | Background artwork for the License page |
@@ -32,9 +32,9 @@ Files:
 Notes:
 
 - The final installer requires Inno Setup 6
-- The bundle includes the application, FFmpeg, and Ghostscript
+- The bundle includes the application, FFmpeg, Ghostscript, qpdf, and 7-Zip
 - Installer artwork is versioned in-repo and switched at runtime via Pascal script
-- The Windows build reuses `dist/windows/engine-cache/` and `dist/windows/document-engine-cache/`; `-RefreshEngine` refreshes both engines
+- The Windows build reuses `dist/windows/engine-cache/`, `dist/windows/pdf-engine-cache/`, and `dist/windows/package-engine-cache/`; `-RefreshEngine` refreshes every bundled engine
 
 ## Linux
 
@@ -55,5 +55,5 @@ Notes:
 - Run from Linux, WSL, or a Linux CI environment
 - Run the Linux build script as your normal user. Use `sudo` only for installing prerequisite packages.
 - Linux bundle builds also need a C toolchain that provides `cc` (`sudo apt update && sudo apt install -y build-essential` on Ubuntu/Debian/WSL)
-- The Linux build reuses `dist/linux/engine-cache/` and `dist/linux/document-engine-cache/`; FFmpeg and Ghostscript are redownloaded when cached archives are incomplete or corrupted
+- The Linux build reuses `dist/linux/engine-cache/`, `dist/linux/pdf-engine-cache/`, and `dist/linux/package-engine-cache/`; FFmpeg, Ghostscript, qpdf, and 7-Zip are redownloaded when cached archives are incomplete or corrupted
 - `.AppImage` output is generated only when `appimagetool` is available

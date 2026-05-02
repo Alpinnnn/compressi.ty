@@ -1,13 +1,18 @@
 mod chrome;
+mod engine_gate;
 mod queue;
 mod settings_panel;
 mod workspace;
 
 use eframe::egui::{self, Align, Layout, Rect, Ui, vec2};
 
-use crate::{modules::ModuleKind, settings::AppSettings, theme::AppTheme};
+use crate::{
+    modules::{ModuleKind, compress_documents::engine::DocumentEngineController},
+    settings::AppSettings,
+    theme::AppTheme,
+};
 
-pub(super) use super::{BannerTone, CompressDocumentsPage};
+pub(super) use super::{BannerMessage, BannerTone, CompressDocumentsPage};
 
 pub(super) fn flush(ui: &mut Ui) {
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -82,11 +87,11 @@ impl CompressDocumentsPage {
         theme: &AppTheme,
         active_module: &mut Option<ModuleKind>,
         app_settings: &AppSettings,
+        document_engine: &mut DocumentEngineController,
     ) {
         if !self.output_dir_user_set {
             self.output_dir = app_settings.preferred_document_output_folder();
         }
-        self.handle_dropped_files(ctx);
         flush(ui);
 
         let panel_rect = ui.max_rect();
@@ -114,6 +119,22 @@ impl CompressDocumentsPage {
         content_ui.add_space(page_margin);
         self.render_header(&mut content_ui, theme, active_module);
         content_ui.add_space(14.0);
+
+        if let Some(message) = &self.banner {
+            chrome::render_banner(&mut content_ui, theme, message);
+            content_ui.add_space(12.0);
+        }
+
+        if self.file_loader_rx.is_some() {
+            chrome::render_loader_status(&mut content_ui, theme, self.pending_add_count);
+            content_ui.add_space(12.0);
+        }
+
+        if !engine_gate::render_document_engine_gate(&mut content_ui, ctx, theme, document_engine) {
+            return;
+        }
+
+        self.handle_dropped_files(ctx);
 
         let workspace_height = content_ui.available_height().max(0.0);
         self.render_workspace(&mut content_ui, ctx, theme, workspace_height);

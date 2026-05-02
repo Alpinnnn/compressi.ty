@@ -23,21 +23,43 @@ pub fn data_dir() -> Option<PathBuf> {
 }
 
 pub fn managed_engine_dir() -> Option<PathBuf> {
-    data_dir().map(|dir| dir.join("engine").join(platform_dirname()))
+    data_dir().map(|dir| {
+        dir.join("engine")
+            .join("video-engine")
+            .join(platform_dirname())
+    })
 }
 
-/// Returns the per-platform folder for managed document compression engines.
-pub fn managed_document_engine_dir() -> Option<PathBuf> {
-    data_dir().map(|dir| dir.join("document-engine").join(platform_dirname()))
+/// Returns the per-platform folder for managed PDF compression engines.
+pub fn managed_pdf_engine_dir() -> Option<PathBuf> {
+    data_dir().map(|dir| {
+        dir.join("engine")
+            .join("pdf-engine")
+            .join(platform_dirname())
+    })
+}
+
+/// Returns the per-platform folder for managed ZIP-package document engines.
+pub fn managed_package_engine_dir() -> Option<PathBuf> {
+    data_dir().map(|dir| {
+        dir.join("engine")
+            .join("package-engine")
+            .join(platform_dirname())
+    })
 }
 
 pub fn bundled_engine_dir() -> Option<PathBuf> {
-    current_exe_dir()
+    current_exe_dir().map(|dir| dir.join("engine").join("video-engine"))
 }
 
-/// Returns the folder used for document engines shipped beside the app binary.
-pub fn bundled_document_engine_dir() -> Option<PathBuf> {
-    current_exe_dir().map(|dir| dir.join("document-engine"))
+/// Returns the folder used for PDF engines shipped beside the app binary.
+pub fn bundled_pdf_engine_dir() -> Option<PathBuf> {
+    current_exe_dir().map(|dir| dir.join("engine").join("pdf-engine"))
+}
+
+/// Returns the folder used for package document engines shipped beside the app binary.
+pub fn bundled_package_engine_dir() -> Option<PathBuf> {
+    current_exe_dir().map(|dir| dir.join("engine").join("package-engine"))
 }
 
 pub fn current_exe_dir() -> Option<PathBuf> {

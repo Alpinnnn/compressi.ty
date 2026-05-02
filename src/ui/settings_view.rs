@@ -1,3 +1,4 @@
+mod document_engine_section;
 mod engine_section;
 mod output_section;
 mod processing_section;
@@ -8,24 +9,29 @@ use eframe::egui::{
 
 use crate::{
     icons,
-    modules::{ModuleKind, compress_videos::engine::VideoEngineController},
+    modules::{
+        ModuleKind, compress_documents::engine::DocumentEngineController,
+        compress_videos::engine::VideoEngineController,
+    },
     settings::AppSettings,
     theme::AppTheme,
     ui::components::{hint, panel},
 };
 
 use self::{
+    document_engine_section::render_document_engine_settings,
     engine_section::render_engine_settings, output_section::render_output_settings,
     processing_section::render_processing_settings,
 };
 
 pub fn show(
     ui: &mut Ui,
-    _ctx: &egui::Context,
+    ctx: &egui::Context,
     theme: &AppTheme,
     app_settings: &mut AppSettings,
     active_module: &mut Option<ModuleKind>,
     video_engine: &mut VideoEngineController,
+    document_engine: &mut DocumentEngineController,
 ) {
     let max_width = 860.0;
     let available_width = ui.available_width();
@@ -59,6 +65,8 @@ pub fn show(
                         render_processing_settings(ui, theme, app_settings);
                         ui.add_space(16.0);
                         render_engine_settings(ui, theme, video_engine);
+                        ui.add_space(16.0);
+                        render_document_engine_settings(ui, ctx, theme, document_engine);
                     },
                 );
             });

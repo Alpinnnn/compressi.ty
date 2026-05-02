@@ -8,7 +8,7 @@ use crate::{
     modules::{
         ModuleKind,
         compress_audio::CompressAudioPage,
-        compress_documents::CompressDocumentsPage,
+        compress_documents::{CompressDocumentsPage, engine::DocumentEngineController},
         compress_photos::CompressPhotosPage,
         compress_videos::{CompressVideosPage, engine::VideoEngineController},
     },
@@ -31,6 +31,7 @@ pub struct CompressityApp {
     app_icon: Option<TextureHandle>,
     app_settings: AppSettings,
     video_engine: VideoEngineController,
+    document_engine: DocumentEngineController,
     pending_launch_import: LaunchImport,
     external_launches: Option<ExternalLaunchReceiver>,
     /// Snapshot of settings from previous frame to detect changes and save.
@@ -57,6 +58,8 @@ impl CompressityApp {
         let app_settings = AppSettings::load();
         let mut video_engine = VideoEngineController::default();
         video_engine.refresh();
+        let mut document_engine = DocumentEngineController::default();
+        document_engine.ensure_ready();
         let active_module = pending_launch_import.preferred_module();
         let external_launches = primary_instance.map(|instance| instance.start(&cc.egui_ctx));
 
@@ -72,6 +75,7 @@ impl CompressityApp {
             theme,
             app_icon: branding::load_app_icon_texture(&cc.egui_ctx),
             video_engine,
+            document_engine,
             pending_launch_import,
             external_launches,
             prev_settings_snapshot: Some(app_settings.clone()),
@@ -238,6 +242,7 @@ impl eframe::App for CompressityApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_external_launches(ctx);
         Self::request_repaint_if_needed(ctx, self.video_engine.poll());
+        Self::request_repaint_if_needed(ctx, self.document_engine.poll());
         Self::request_repaint_if_needed(
             ctx,
             self.compress_audio.poll_background(&mut self.video_engine),
@@ -283,6 +288,7 @@ impl eframe::App for CompressityApp {
                         &self.theme,
                         &mut self.active_module,
                         &self.app_settings,
+                        &mut self.document_engine,
                     ),
                     Some(ModuleKind::CompressPhotos) => self.compress_photos.show(
                         ui,
@@ -307,6 +313,7 @@ impl eframe::App for CompressityApp {
                             &mut self.app_settings,
                             &mut self.active_module,
                             &mut self.video_engine,
+                            &mut self.document_engine,
                         );
                         // Persist settings whenever they change while in settings view.
                         let changed = self

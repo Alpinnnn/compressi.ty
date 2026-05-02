@@ -6,11 +6,12 @@ use std::{
     process::Command,
 };
 
-use crate::runtime;
+use crate::modules::compress_documents::engine;
 
 pub(super) fn run_tool(binary: &Path, args: &[OsString], label: &str) -> Result<(), String> {
     let mut command = Command::new(binary);
     command.args(args);
+    configure_document_tool_environment(binary, &mut command);
     run_command(command, binary, label)
 }
 
@@ -54,90 +55,11 @@ fn run_command(mut command: Command, binary: &Path, label: &str) -> Result<(), S
 }
 
 pub(super) fn discover_ghostscript_binary() -> Option<PathBuf> {
-    if cfg!(windows) {
-        discover_binary(&["gswin64c.exe", "gswin32c.exe", "gs.exe", "gs"])
-    } else {
-        discover_binary(&["gs"])
-    }
+    engine::discover_ghostscript_binary()
 }
 
 pub(super) fn discover_qpdf_binary() -> Option<PathBuf> {
-    if cfg!(windows) {
-        discover_binary(&["qpdf.exe", "qpdf"])
-    } else {
-        discover_binary(&["qpdf"])
-    }
-}
-
-fn discover_binary(names: &[&str]) -> Option<PathBuf> {
-    for (dir, depth) in document_engine_dirs() {
-        if let Some(binary) = find_binary_in_dir(&dir, names, depth) {
-            return Some(binary);
-        }
-    }
-
-    system_binary_candidates(names)
-        .into_iter()
-        .find(|path| path.is_file())
-}
-
-fn document_engine_dirs() -> Vec<(PathBuf, usize)> {
-    let mut dirs = Vec::new();
-    for dir in [
-        runtime::managed_document_engine_dir(),
-        runtime::bundled_document_engine_dir(),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        dirs.push((dir.join("bin"), 2));
-        dirs.push((dir, 4));
-    }
-
-    if let Some(exe_dir) = runtime::current_exe_dir() {
-        dirs.push((exe_dir.join("bin"), 0));
-        dirs.push((exe_dir, 0));
-    }
-    dirs
-}
-
-fn system_binary_candidates(names: &[&str]) -> Vec<PathBuf> {
-    env::var_os("PATH")
-        .map(|path_value| {
-            env::split_paths(&path_value)
-                .flat_map(|dir| names.iter().map(move |name| dir.join(name)))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn find_binary_in_dir(dir: &Path, names: &[&str], remaining_depth: usize) -> Option<PathBuf> {
-    if !dir.is_dir() {
-        return None;
-    }
-
-    for name in names {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-
-    if remaining_depth == 0 {
-        return None;
-    }
-
-    let entries = fs::read_dir(dir).ok()?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir()
-            && let Some(binary) = find_binary_in_dir(&path, names, remaining_depth - 1)
-        {
-            return Some(binary);
-        }
-    }
-
-    None
+    engine::discover_qpdf_binary()
 }
 
 fn configure_ghostscript_environment(binary: &Path, command: &mut Command) {
@@ -169,7 +91,25 @@ fn configure_ghostscript_environment(binary: &Path, command: &mut Command) {
     }
 }
 
+fn configure_document_tool_environment(binary: &Path, command: &mut Command) {
+    if cfg!(windows) {
+        return;
+    }
+
+    let Some(root) = tool_root(binary) else {
+        return;
+    };
+    let mut library_dirs = Vec::new();
+    collect_existing_dirs(&root.join("lib"), 2, &mut library_dirs);
+    collect_existing_dirs(&root.join("lib64"), 1, &mut library_dirs);
+    append_env_paths(command, "LD_LIBRARY_PATH", library_dirs);
+}
+
 fn ghostscript_root(binary: &Path) -> Option<PathBuf> {
+    tool_root(binary)
+}
+
+fn tool_root(binary: &Path) -> Option<PathBuf> {
     let parent = binary.parent()?;
     if parent
         .file_name()

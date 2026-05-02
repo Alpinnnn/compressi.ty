@@ -7,24 +7,28 @@ use image::{
 };
 use mozjpeg::{ColorSpace, Compress, ScanMode};
 
-use crate::modules::compress_documents::models::DocumentCompressionSettings;
+use crate::modules::compress_documents::models::PackageDocumentCompressionSettings;
 
 const MIN_OPTIMIZE_IMAGE_BYTES: usize = 16 * 1024;
 const MIN_RESIZE_DIMENSION: u32 = 512;
 
+#[derive(Clone, Copy)]
 enum PackageImageFormat {
     Jpeg,
     Png,
 }
 
-pub(super) fn should_optimize_entry(name: &str, settings: &DocumentCompressionSettings) -> bool {
+pub(super) fn should_optimize_entry(
+    name: &str,
+    settings: &PackageDocumentCompressionSettings,
+) -> bool {
     settings.package_image_optimization_enabled() && package_image_format(name).is_some()
 }
 
 pub(super) fn optimize_entry_payload(
     name: &str,
     payload: Vec<u8>,
-    settings: &DocumentCompressionSettings,
+    settings: &PackageDocumentCompressionSettings,
 ) -> Result<Vec<u8>, String> {
     if payload.len() < MIN_OPTIMIZE_IMAGE_BYTES {
         return Ok(payload);
@@ -38,18 +42,17 @@ pub(super) fn optimize_entry_payload(
         .map_err(|error| format!("Could not inspect embedded image {name}: {error}"))?
         .decode()
         .map_err(|error| format!("Could not decode embedded image {name}: {error}"))?;
-    let image = resize_package_image(image, settings.package_image_resize_percent());
 
-    let encoded = match format {
-        PackageImageFormat::Jpeg => encode_jpeg(&image, settings.package_image_quality())?,
-        PackageImageFormat::Png => encode_png(&image)?,
-    };
-
-    if encoded.len() < payload.len() {
-        Ok(encoded)
-    } else {
-        Ok(payload)
+    let mut best_payload = payload;
+    let mut best_size = best_payload.len();
+    for candidate in optimized_payload_candidates(format, image, settings)? {
+        if candidate.len() < best_size {
+            best_size = candidate.len();
+            best_payload = candidate;
+        }
     }
+
+    Ok(best_payload)
 }
 
 fn package_image_format(name: &str) -> Option<PackageImageFormat> {
@@ -79,6 +82,38 @@ fn resize_package_image(image: image::DynamicImage, resize_percent: u8) -> image
     let target_height = ((height as f32 * scale).round() as u32).max(1);
 
     image.resize(target_width, target_height, ResizeFilter::Lanczos3)
+}
+
+fn optimized_payload_candidates(
+    format: PackageImageFormat,
+    image: image::DynamicImage,
+    settings: &PackageDocumentCompressionSettings,
+) -> Result<Vec<Vec<u8>>, String> {
+    let resize_percent = settings.package_image_resize_percent();
+    let quality = settings.package_image_quality();
+    let original_width = image.width();
+    let original_height = image.height();
+    let mut candidates = vec![encode_package_image(format, &image, quality)?];
+
+    if resize_percent < 100 {
+        let resized = resize_package_image(image, resize_percent);
+        if resized.width() != original_width || resized.height() != original_height {
+            candidates.push(encode_package_image(format, &resized, quality)?);
+        }
+    }
+
+    Ok(candidates)
+}
+
+fn encode_package_image(
+    format: PackageImageFormat,
+    image: &image::DynamicImage,
+    quality: u8,
+) -> Result<Vec<u8>, String> {
+    match format {
+        PackageImageFormat::Jpeg => encode_jpeg(image, quality),
+        PackageImageFormat::Png => encode_png(image),
+    }
 }
 
 fn encode_jpeg(image: &image::DynamicImage, quality: u8) -> Result<Vec<u8>, String> {
@@ -138,4 +173,73 @@ fn rgba_to_rgb_over_white(rgba: &image::RgbaImage) -> image::RgbImage {
     }
 
     rgb
+}
+
+#[cfg(test)]
+mod tests {
+    use image::{
+        ExtendedColorType, ImageBuffer, ImageEncoder, Rgba,
+        codecs::png::{CompressionType, FilterType, PngEncoder},
+    };
+
+    use crate::modules::compress_documents::models::{
+        DocumentCompressionPreset, PackageDocumentCompressionSettings,
+    };
+
+    use super::{encode_png, optimize_entry_payload, resize_package_image};
+
+    #[test]
+    fn png_optimization_keeps_smallest_candidate() {
+        let mut image = ImageBuffer::new(768, 768);
+        for (x, y, pixel) in image.enumerate_pixels_mut() {
+            let value = if ((x / 8) + (y / 8)) % 2 == 0 {
+                20
+            } else {
+                235
+            };
+            *pixel = Rgba([value, value, value, 255]);
+        }
+
+        let image = image::DynamicImage::ImageRgba8(image);
+        let source_payload = encode_fast_source_png(&image);
+        let mut settings = PackageDocumentCompressionSettings::default();
+        settings.apply_preset(DocumentCompressionPreset::UltraCompression);
+
+        let optimized =
+            optimize_entry_payload("word/media/image1.png", source_payload.clone(), &settings)
+                .unwrap();
+        let lossless_payload = encode_png(&image).unwrap();
+        let resized_image = resize_package_image(image, settings.package_image_resize_percent());
+        let resized_payload = encode_png(&resized_image).unwrap();
+        let expected_size = [
+            source_payload.len(),
+            lossless_payload.len(),
+            resized_payload.len(),
+        ]
+        .into_iter()
+        .min()
+        .unwrap();
+
+        assert!(
+            lossless_payload.len() < resized_payload.len(),
+            "fixture should make the lossless candidate smaller than the resized PNG"
+        );
+        assert_eq!(optimized.len(), expected_size);
+    }
+
+    fn encode_fast_source_png(image: &image::DynamicImage) -> Vec<u8> {
+        let rgba = image.to_rgba8();
+        let mut encoded = Vec::new();
+        let encoder =
+            PngEncoder::new_with_quality(&mut encoded, CompressionType::Fast, FilterType::NoFilter);
+        encoder
+            .write_image(
+                rgba.as_raw(),
+                image.width(),
+                image.height(),
+                ExtendedColorType::Rgba8,
+            )
+            .unwrap();
+        encoded
+    }
 }

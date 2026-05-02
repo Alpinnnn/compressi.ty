@@ -1,7 +1,6 @@
 use std::{
     ffi::OsStr,
-    fs::{self, File},
-    io::{self, Read, Write},
+    fs,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -12,8 +11,6 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
-
 use crate::{
     modules::compress_documents::models::{
         DocumentAsset, DocumentCompressionResult, DocumentCompressionSettings,
@@ -23,7 +20,9 @@ use crate::{
     runtime,
 };
 
+mod package_engine;
 mod package_media;
+mod package_zip;
 mod pdf;
 mod pdf_tools;
 
@@ -197,9 +196,24 @@ fn compress_one(
     });
 
     match asset.kind {
-        DocumentKind::Pdf => pdf::compress_pdf(asset, settings, &output_path, cancel_flag, sender)?,
+        DocumentKind::Pdf => pdf::compress_pdf(
+            asset,
+            settings.pdf_settings(),
+            &output_path,
+            cancel_flag,
+            sender,
+        )?,
         kind if kind.is_zip_package() => {
-            recompress_zip_package(asset, settings, &output_path, cancel_flag, sender)?
+            let Some(package_settings) = settings.package_settings(kind) else {
+                return Err(format!("Unsupported document: {}", asset.file_name));
+            };
+            package_zip::recompress_zip_package(
+                asset,
+                package_settings,
+                &output_path,
+                cancel_flag,
+                sender,
+            )?
         }
         _ => return Err(format!("Unsupported document: {}", asset.file_name)),
     }
@@ -224,150 +238,6 @@ fn compress_one(
         compressed_size,
         reduction_percent,
     })
-}
-
-fn recompress_zip_package(
-    asset: &DocumentAsset,
-    settings: &DocumentCompressionSettings,
-    output_path: &Path,
-    cancel_flag: &AtomicBool,
-    sender: &Sender<DocumentBatchEvent>,
-) -> Result<(), String> {
-    let input = File::open(&asset.path)
-        .map_err(|error| format!("Could not open {}: {error}", asset.path.display()))?;
-    let mut archive = ZipArchive::new(input)
-        .map_err(|error| format!("Could not read package {}: {error}", asset.path.display()))?;
-    let output = File::create(output_path)
-        .map_err(|error| format!("Could not create {}: {error}", output_path.display()))?;
-    let mut writer = ZipWriter::new(output);
-    let total_entries = archive.len().max(1);
-
-    if requires_stored_mimetype(asset.kind) {
-        write_stored_mimetype_first(&mut archive, &mut writer)?;
-    }
-
-    for index in 0..archive.len() {
-        if cancel_flag.load(Ordering::Relaxed) {
-            return Err("Compression cancelled.".to_owned());
-        }
-
-        let mut entry = archive.by_index(index).map_err(|error| {
-            format!(
-                "Could not read package entry {index} in {}: {error}",
-                asset.file_name
-            )
-        })?;
-        let name = entry.name().to_owned();
-        if requires_stored_mimetype(asset.kind) && name == "mimetype" {
-            continue;
-        }
-        if entry.enclosed_name().is_none() {
-            return Err(format!("Package entry has an unsafe path: {name}"));
-        }
-
-        let progress = 0.18 + ((index + 1) as f32 / total_entries as f32) * 0.68;
-        let _ = sender.send(DocumentBatchEvent::FileProgress {
-            id: asset.id,
-            progress,
-            stage: format!("Packing {}/{}", index + 1, total_entries),
-        });
-
-        let unix_mode = entry.unix_mode();
-        if entry.is_dir() {
-            let options = zip_entry_options(settings, false, unix_mode, false);
-            writer
-                .add_directory(name, options)
-                .map_err(|error| format!("Could not add directory to package: {error}"))?;
-        } else if package_media::should_optimize_entry(&name, settings) {
-            let mut payload = Vec::new();
-            entry
-                .read_to_end(&mut payload)
-                .map_err(|error| format!("Could not read package media entry: {error}"))?;
-            let payload = package_media::optimize_entry_payload(&name, payload, settings)?;
-            let large_file = payload.len() > u32::MAX as usize;
-            let options = zip_entry_options(settings, false, unix_mode, large_file);
-            writer
-                .start_file(name, options)
-                .map_err(|error| format!("Could not add file to package: {error}"))?;
-            writer
-                .write_all(&payload)
-                .map_err(|error| format!("Could not write optimized package media: {error}"))?;
-        } else {
-            let large_file = entry.size() > u64::from(u32::MAX);
-            let options = zip_entry_options(settings, false, unix_mode, large_file);
-            writer
-                .start_file(name, options)
-                .map_err(|error| format!("Could not add file to package: {error}"))?;
-            io::copy(&mut entry, &mut writer)
-                .map_err(|error| format!("Could not recompress package entry: {error}"))?;
-        }
-    }
-
-    let _ = sender.send(DocumentBatchEvent::FileProgress {
-        id: asset.id,
-        progress: 0.92,
-        stage: "Finalizing package".to_owned(),
-    });
-    writer
-        .finish()
-        .map_err(|error| format!("Could not finalize package: {error}"))?;
-
-    Ok(())
-}
-
-fn write_stored_mimetype_first<W: io::Write + io::Seek>(
-    archive: &mut ZipArchive<File>,
-    writer: &mut ZipWriter<W>,
-) -> Result<(), String> {
-    let Ok(mut mimetype) = archive.by_name("mimetype") else {
-        return Ok(());
-    };
-    writer
-        .start_file(
-            "mimetype",
-            zip_entry_options(
-                &DocumentCompressionSettings::default(),
-                true,
-                mimetype.unix_mode(),
-                false,
-            ),
-        )
-        .map_err(|error| format!("Could not preserve stored mimetype entry: {error}"))?;
-    io::copy(&mut mimetype, writer)
-        .map_err(|error| format!("Could not copy stored mimetype entry: {error}"))?;
-    Ok(())
-}
-
-fn requires_stored_mimetype(kind: DocumentKind) -> bool {
-    matches!(kind, DocumentKind::OpenDocument | DocumentKind::Epub)
-}
-
-fn zip_entry_options(
-    settings: &DocumentCompressionSettings,
-    stored: bool,
-    unix_mode: Option<u32>,
-    large_file: bool,
-) -> SimpleFileOptions {
-    let method = if stored {
-        CompressionMethod::Stored
-    } else {
-        CompressionMethod::Deflated
-    };
-    let level = if stored {
-        None
-    } else {
-        Some(settings.zip_compression_level())
-    };
-    let mut options = SimpleFileOptions::default()
-        .compression_method(method)
-        .compression_level(level)
-        .large_file(large_file);
-
-    if let Some(mode) = unix_mode {
-        options = options.unix_permissions(mode);
-    }
-
-    options
 }
 
 fn resolve_output_dir(base_output_dir: Option<PathBuf>) -> Result<PathBuf, String> {

@@ -1,9 +1,12 @@
+pub mod engine;
 mod logic;
 pub mod models;
 pub mod processor;
 mod ui;
 
-use std::{path::PathBuf, sync::mpsc};
+use std::{collections::HashMap, path::PathBuf, sync::mpsc};
+
+use eframe::egui::TextureHandle;
 
 use crate::modules::compress_documents::{
     models::{DocumentCompressionSettings, DocumentQueueItem, LoadedDocument},
@@ -26,6 +29,7 @@ pub struct CompressDocumentsPage {
     banner: Option<BannerMessage>,
     file_loader_rx: Option<mpsc::Receiver<FileLoadResult>>,
     pending_add_count: usize,
+    document_icon_textures: HashMap<&'static str, TextureHandle>,
 }
 
 struct FileLoadResult {

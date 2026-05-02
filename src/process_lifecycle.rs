@@ -38,6 +38,45 @@ pub fn read_pipe_to_string<R: Read>(reader: R) -> String {
     String::from_utf8_lossy(&read_pipe_to_end_lossy(reader)).into_owned()
 }
 
+/// Restarts the current application with administrator privileges on Windows.
+#[cfg(target_os = "windows")]
+pub fn restart_as_administrator() -> io::Result<()> {
+    let exe = std::env::current_exe()?;
+    let exe = escape_powershell_single_quoted(&exe.display().to_string());
+    let pid = std::process::id();
+    let script = format!(
+        "$ErrorActionPreference='Stop'; \
+         try {{ Wait-Process -Id {pid} -Timeout 20 -ErrorAction SilentlyContinue }} catch {{ }}; \
+         Start-Process -FilePath '{exe}' -Verb RunAs"
+    );
+
+    let mut command = Command::new("powershell.exe");
+    command.args([
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-WindowStyle",
+        "Hidden",
+        "-Command",
+        &script,
+    ]);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    command.spawn().map(|_| ())
+}
+
+/// Returns an unsupported-platform error for non-Windows builds.
+#[cfg(not(target_os = "windows"))]
+pub fn restart_as_administrator() -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "administrator restart is only available on Windows",
+    ))
+}
+
 fn join_reader(reader: Option<thread::JoinHandle<io::Result<Vec<u8>>>>) -> io::Result<Vec<u8>> {
     match reader {
         Some(reader) => reader
@@ -72,6 +111,11 @@ fn prepare_command(command: &mut Command) {
     linux::set_parent_death_signal(command);
     #[cfg(not(target_os = "linux"))]
     let _ = command;
+}
+
+#[cfg(target_os = "windows")]
+fn escape_powershell_single_quoted(value: &str) -> String {
+    value.replace('\'', "''")
 }
 
 #[cfg(not(target_os = "windows"))]
