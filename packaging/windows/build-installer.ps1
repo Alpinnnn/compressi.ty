@@ -17,7 +17,6 @@ $installerDir = Join-Path $windowsDistRoot "installer"
 $engineCache = Join-Path $windowsDistRoot "engine-cache"
 $pdfEngineCache = Join-Path $windowsDistRoot "pdf-engine-cache"
 $packageEngineCache = Join-Path $windowsDistRoot "package-engine-cache"
-$setupIconPath = Join-Path $repoRoot "assets\\icon\\icon.ico"
 $ghostscriptVersion = "10.07.0"
 $ghostscriptTag = "gs10070"
 $ghostscriptInstaller = "gs10070w64.exe"
@@ -371,28 +370,6 @@ function Stage-AppBundle([string]$StageDir) {
     Copy-Item "LICENSE" (Join-Path $StageDir "LICENSE.txt") -Force
 }
 
-function Sync-SetupIconFromExe([string]$ExePath) {
-    Add-Type -AssemblyName System.Drawing
-
-    $resolvedExe = (Resolve-Path $ExePath).Path
-    $iconDir = Split-Path -Parent $setupIconPath
-    New-Item -ItemType Directory -Force -Path $iconDir | Out-Null
-
-    $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($resolvedExe)
-    if (-not $icon) {
-        throw "Could not extract the app icon from $resolvedExe."
-    }
-
-    $stream = [System.IO.File]::Open($setupIconPath, [System.IO.FileMode]::Create)
-    try {
-        $icon.Save($stream)
-    }
-    finally {
-        $stream.Dispose()
-        $icon.Dispose()
-    }
-}
-
 function Copy-BundledEngine([string]$StageDir, $EngineArtifacts, $PdfEngineArtifacts, $PackageEngineArtifacts) {
     $videoEngineDir = Join-Path $StageDir "engine\\video-engine"
     Remove-Item $videoEngineDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -422,7 +399,6 @@ if (-not $SkipTests) {
 }
 
 cargo build --release
-Sync-SetupIconFromExe "target\\release\\compressity.exe"
 
 $version = Get-AppVersion
 $requestedVariants = Get-RequestedVariants
